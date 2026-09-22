@@ -275,6 +275,51 @@ describe('InstagramService', () => {
     });
   });
 
+  describe('isOwnAccountComment', () => {
+    // Regression tests for a real production incident (2026-09-24): a
+    // REPLY_COMMENT automation replied to its own reply forever because
+    // nothing recognized the reply Meta re-delivered as a webhook event was
+    // authored by the connected account itself.
+    function makeAccountPrisma(account: Record<string, unknown> | null) {
+      return { instagramAccount: { findUnique: jest.fn().mockResolvedValue(account) } } as any;
+    }
+
+    it('matches by id against igBusinessId', async () => {
+      const prisma = makeAccountPrisma({ igBusinessId: 'biz-1', igUserId: 'user-1', igUsername: 'ig_orincore' });
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.isOwnAccountComment('acc-1', { id: 'biz-1' })).toBe(true);
+    });
+
+    it('matches by id against igUserId', async () => {
+      const prisma = makeAccountPrisma({ igBusinessId: 'biz-1', igUserId: 'user-1', igUsername: 'ig_orincore' });
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.isOwnAccountComment('acc-1', { id: 'user-1' })).toBe(true);
+    });
+
+    it('matches by username case-insensitively when no id is present (the exact incident payload)', async () => {
+      const prisma = makeAccountPrisma({ igBusinessId: 'biz-1', igUserId: 'user-1', igUsername: 'ig_orincore' });
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.isOwnAccountComment('acc-1', { username: 'IG_Orincore' })).toBe(true);
+    });
+
+    it('returns false for a real viewer', async () => {
+      const prisma = makeAccountPrisma({ igBusinessId: 'biz-1', igUserId: 'user-1', igUsername: 'ig_orincore' });
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.isOwnAccountComment('acc-1', { id: 'viewer-1', username: 'a_real_viewer' })).toBe(false);
+    });
+
+    it('returns false when the account no longer exists', async () => {
+      const prisma = makeAccountPrisma(null);
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.isOwnAccountComment('acc-1', { id: 'anything' })).toBe(false);
+    });
+  });
+
   describe('handleCallback', () => {
     it('stores igBusinessId (profile.id) and igUserId (profile.user_id) as distinct values', async () => {
       // Regression test for the bug where webhooks stopped matching any

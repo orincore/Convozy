@@ -70,6 +70,16 @@ export class WebhooksController {
       }
 
       for (const change of entry.changes ?? []) {
+        // Structural self-loop guard (real incident, 2026-09-24): a
+        // REPLY_COMMENT automation's own reply is legitimately re-delivered
+        // by Meta as a fresh comment event authored by this same account —
+        // without this check, a broadly-matching trigger replies to its own
+        // reply forever. Checked before mapping/enqueueing, never reachable
+        // by matching/dispatch at all. See InstagramService.isOwnAccountComment.
+        if (change.value.from && (await this.instagramService.isOwnAccountComment(instagramAccountId, change.value.from))) {
+          this.logger.debug(`Dropping self-authored comment ${change.value.id} on account ${instagramAccountId}`);
+          continue;
+        }
         const jobData = this.mapChangeToJobData(change, instagramAccountId);
         if (jobData) {
           await this.webhooksService.enqueueIfNew(jobData);
@@ -77,6 +87,15 @@ export class WebhooksController {
       }
 
       for (const messagingEvent of entry.messaging ?? []) {
+        // Same structural guard as above, applied defensively here too —
+        // Convozy doesn't currently subscribe to message_echoes, so this
+        // shouldn't be reachable in practice, but a broken/self-authored
+        // conversation-sourced event must never be treated as a real viewer
+        // either.
+        if (await this.instagramService.isOwnAccountComment(instagramAccountId, { id: messagingEvent.sender.id })) {
+          this.logger.debug(`Dropping self-authored message ${messagingEvent.message?.mid} on account ${instagramAccountId}`);
+          continue;
+        }
         const jobData = this.mapMessagingEventToJobData(messagingEvent, instagramAccountId);
         if (jobData) {
           await this.webhooksService.enqueueIfNew(jobData);
@@ -103,6 +122,7 @@ export class WebhooksController {
       source,
       mediaId: change.value.media?.id,
       fromUsername: change.value.from.username,
+      fromIgScopedId: change.value.from.id,
       text: change.value.text ?? '',
       receivedAt: new Date().toISOString(),
     };
@@ -136,6 +156,7 @@ export class WebhooksController {
       instagramAccountId,
       source: 'STORY_REPLY',
       fromUsername: event.sender.id,
+      fromIgScopedId: event.sender.id,
       text: event.message.text ?? '',
       receivedAt: new Date(event.timestamp * 1000).toISOString(),
     };

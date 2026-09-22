@@ -123,6 +123,33 @@ export class InstagramService {
   }
 
   /**
+   * Real production incident, 2026-09-24: a REPLY_COMMENT automation with
+   * an unconditional (empty-keyword) trigger replied to its own reply,
+   * which Meta's `comments`/`live_comments` webhook legitimately
+   * re-delivers as a fresh comment authored by the connected account
+   * itself — creating an infinite public reply loop (a new comment every
+   * ~3-4s). Nothing previously distinguished "a real viewer commented"
+   * from "the account's own automated reply came back as a webhook event."
+   * Called by WebhooksController before enqueueing any COMMENT/LIVE_COMMENT
+   * event, so a self-authored comment never reaches matching/dispatch at
+   * all — this is a structural guard, not something a trigger/condition
+   * author can misconfigure their way around.
+   */
+  async isOwnAccountComment(instagramAccountId: string, from: { id?: string; username?: string }): Promise<boolean> {
+    const account = await this.prisma.instagramAccount.findUnique({
+      where: { id: instagramAccountId },
+      select: { igBusinessId: true, igUserId: true, igUsername: true },
+    });
+    if (!account) {
+      return false;
+    }
+    if (from.id && (from.id === account.igBusinessId || from.id === account.igUserId)) {
+      return true;
+    }
+    return !!from.username && from.username.toLowerCase() === account.igUsername.toLowerCase();
+  }
+
+  /**
    * Used by other modules (e.g. automations) to check an InstagramAccount
    * belongs to the caller's workspace before referencing it, without those
    * modules querying InstagramAccount directly — CLAUDE.md §3 rule 1.

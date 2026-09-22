@@ -48,6 +48,7 @@ function makeController() {
   } as any;
   const instagramService = {
     findAccountIdByIgUserId: jest.fn().mockResolvedValue('account-1'),
+    isOwnAccountComment: jest.fn().mockResolvedValue(false),
   } as any;
   const controller = new WebhooksController(webhooksService, instagramService);
   return { controller, webhooksService, instagramService };
@@ -141,6 +142,76 @@ describe('WebhooksController.receive — story replies', () => {
     };
 
     await controller.receive(makeRequest(payload), 'sha256=whatever');
+
+    expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
+  });
+});
+
+describe('WebhooksController.receive — self-authored comment loop guard', () => {
+  // Regression test for a real production incident (2026-09-24): a
+  // REPLY_COMMENT automation replied to its own reply forever, because
+  // Meta legitimately re-delivers the account's own public reply as a
+  // fresh comment webhook event. See InstagramService.isOwnAccountComment.
+  function commentPayload(from: { id: string; username: string }, id = 'comment-1'): MetaWebhookPayload {
+    return {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-business-1',
+          time: 1700000000,
+          changes: [
+            {
+              field: 'comments',
+              value: { id, text: 'nice post!', from, media: { id: 'media-1' } },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('enqueues a comment from a real viewer', async () => {
+    const { controller, webhooksService } = makeController();
+
+    await controller.receive(makeRequest(commentPayload({ id: 'viewer-1', username: 'a_real_viewer' })), 'sha256=x');
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'COMMENT', fromUsername: 'a_real_viewer' }),
+    );
+  });
+
+  it('drops a comment the connected account posted about itself instead of enqueueing it', async () => {
+    const { controller, webhooksService, instagramService } = makeController();
+    instagramService.isOwnAccountComment.mockResolvedValue(true);
+
+    await controller.receive(makeRequest(commentPayload({ id: 'own-id', username: 'ig_orincore' })), 'sha256=x');
+
+    expect(instagramService.isOwnAccountComment).toHaveBeenCalledWith('account-1', { id: 'own-id', username: 'ig_orincore' });
+    expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
+  });
+
+  it('drops a self-authored messaging event the same way', async () => {
+    const { controller, webhooksService, instagramService } = makeController();
+    instagramService.isOwnAccountComment.mockResolvedValue(true);
+    const payload: MetaWebhookPayload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-business-1',
+          time: 1700000000,
+          messaging: [
+            {
+              sender: { id: 'own-id' },
+              recipient: { id: 'ig-business-1' },
+              timestamp: 1700000000,
+              message: { mid: 'msg-1', text: 'hi', reply_to: { story: { id: 's-1', url: 'x' } } },
+            },
+          ],
+        },
+      ],
+    };
+
+    await controller.receive(makeRequest(payload), 'sha256=x');
 
     expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
   });
