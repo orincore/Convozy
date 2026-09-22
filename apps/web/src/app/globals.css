@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Locked dark, monochrome theme (user directive: "complete black and
+     white theme, dark theme") - no color accent. Primary actions use an
+     inverted white-on-black treatment instead of a brand color. */
+  --color-background: #0a0a0b;
+  --color-foreground: #fafafa;
+
+  --color-muted: #18181b;
+  --color-muted-foreground: #a1a1aa;
+
+  --color-card: #111113;
+  --color-card-foreground: var(--color-foreground);
+
+  --color-border: #27272a;
+  --color-ring: #ffffff;
+
+  /* "Accent" = white-on-black inversion, not a brand color. */
+  --color-accent: #fafafa;
+  --color-accent-foreground: #0a0a0b;
+
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+
+  --radius-card: 1rem;
+  --radius-control: 0.625rem;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  background: var(--color-background);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}

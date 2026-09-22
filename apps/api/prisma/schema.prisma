@@ -1,0 +1,462 @@
+// Convozy data model.
+// See ARCHITECTURE.md §4 for the narrative description of each entity.
+// Rules for changing this file live in CLAUDE.md §6 (additive/backwards-compatible
+// migrations only) and §3 (a module owns its own models conceptually).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// auth / users / billing boundary
+// ─────────────────────────────────────────────────────────────────────────
+
+model User {
+  id     String @id @default(cuid())
+  email  String @unique
+  // Null for accounts created via an OAuth provider only (no password set).
+  passwordHash String?
+  name         String?
+  role         UserRole @default(OWNER)
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // OAuth identities. A user can have a password, an OAuth identity, or both
+  // — AuthService links by email so a Google sign-in on an existing
+  // password account doesn't create a duplicate user.
+  googleId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@index([workspaceId])
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id   String @id @default(cuid())
+  name String
+
+  users              User[]
+  instagramAccounts  InstagramAccount[]
+  automations        Automation[]
+  subscription       Subscription?
+  usageRecords       UsageRecord[]
+  auditLogs          AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// instagram module
+// ─────────────────────────────────────────────────────────────────────────
+
+model InstagramAccount {
+  id          String  @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // App-scoped ID from Business Login's own graph.instagram.com calls (the
+  // `id` field on /me). Used for outbound Graph API calls (media, sends) -
+  // see instagram.service.ts and messaging.service.ts. NOT the ID Meta puts
+  // in webhook payloads; see igUserId below.
+  igBusinessId    String  @unique
+  // The Instagram-scoped user ID (the `user_id` field on /me, distinct from
+  // `id`) - this is what Meta actually puts in webhook payloads' entry.id.
+  // Nullable because accounts connected before this field existed won't have
+  // it until they reconnect (CLAUDE.md §6 additive migration). See
+  // TRACKER.md "webhook signature + ID mismatch" for the full diagnosis.
+  igUserId        String? @unique
+  igUsername      String
+  accountType     String? // "BUSINESS" | "MEDIA_CREATOR" | "PERSONAL", from Graph API
+  // Linked Facebook Page ID - only present for accounts connected via the
+  // classic Facebook Login + Pages flow, not the direct Instagram Login flow
+  // this app uses (see instagram.service.ts). Kept nullable for that reason.
+  pageId          String?
+
+  // Encrypted at rest (AES-256-GCM) — see CLAUDE.md §5. Never log this field.
+  encryptedAccessToken String
+  tokenExpiresAt       DateTime?
+
+  status       InstagramAccountStatus @default(ACTIVE)
+  connectedAt  DateTime @default(now())
+  disconnectedAt DateTime?
+
+  automations   Automation[]
+  commentEvents CommentEvent[]
+  messageLogs   MessageLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId])
+}
+
+enum InstagramAccountStatus {
+  ACTIVE
+  TOKEN_EXPIRED
+  RATE_LIMITED
+  DISCONNECTED
+  ERROR
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// automations module
+// ─────────────────────────────────────────────────────────────────────────
+
+model Automation {
+  id                  String @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccountId  String
+  instagramAccount    InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  name      String
+  status    AutomationStatus @default(ACTIVE)
+  scopeType AutomationScopeType @default(ALL_POSTS)
+  scopeMediaIds String[] // Instagram media IDs when scopeType = SPECIFIC_POSTS
+  priority  Int @default(0) // higher runs first when multiple automations could match
+
+  triggers Trigger[]
+  actions  Action[]
+
+  commentEvents CommentEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([instagramAccountId, status])
+}
+
+enum AutomationStatus {
+  ACTIVE
+  PAUSED
+  DRAFT
+}
+
+enum AutomationScopeType {
+  ALL_POSTS
+  SPECIFIC_POSTS
+}
+
+model Trigger {
+  id           String @id @default(cuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  source        TriggerSource
+  matchType     TriggerMatchType
+  keywords      String[] // for exact/contains/regex; unused for ai_intent
+  caseSensitive Boolean @default(false)
+  aiIntentLabel String? // for matchType = AI_INTENT, e.g. "wants pricing info"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([automationId])
+}
+
+enum TriggerSource {
+  COMMENT
+  DM
+  STORY_REPLY
+  LIVE_COMMENT
+}
+
+enum TriggerMatchType {
+  EXACT
+  CONTAINS
+  REGEX
+  AI_INTENT
+}
+
+model Action {
+  id           String @id @default(cuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  type        ActionType
+  order       Int @default(0)
+  delaySeconds Int @default(0)
+
+  // Static text/template payload. For AI_REPLY, this is the system prompt/context
+  // rather than a literal message — see the `ai` module. Optional for
+  // CONDITION actions, which carry no message payload of their own.
+  payload Json?
+
+  // Branching tree (Milestone 1, condition/branching). Root-level actions
+  // have parentActionId = null and branch = null. A CONDITION action's
+  // children have branch = THEN or ELSE depending on which side of the
+  // Condition they run on. Every existing automation's actions are already
+  // root-level (parentActionId null) — fully backwards compatible.
+  parentActionId String?
+  parent         Action?  @relation("ActionChildren", fields: [parentActionId], references: [id], onDelete: Cascade)
+  children       Action[] @relation("ActionChildren")
+  branch         ActionBranch?
+
+  // Only present when type = CONDITION.
+  condition Condition?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([automationId])
+  @@index([parentActionId])
+}
+
+enum ActionType {
+  SEND_DM
+  REPLY_COMMENT
+  SEND_AI_REPLY
+  CONDITION
+}
+
+enum ActionBranch {
+  THEN
+  ELSE
+}
+
+// A CONDITION action's test — evaluated against the triggering CommentEvent,
+// same match-type semantics as Trigger (mirrored deliberately, including the
+// AI_INTENT stub, per CLAUDE.md §14: branching supports every option a
+// trigger does, not a simplified subset).
+model Condition {
+  id       String @id @default(cuid())
+  actionId String @unique
+  action   Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  matchType     TriggerMatchType
+  field         ConditionField @default(COMMENT_TEXT)
+  keywords      String[]
+  caseSensitive Boolean @default(false)
+  aiIntentLabel String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ConditionField {
+  COMMENT_TEXT
+  SENDER_USERNAME
+}
+
+// Global, curated starter automations a workspace can "install" instead of
+// building from scratch (CLAUDE.md §13: lowers time-to-first-automation).
+// Not workspace-scoped — these are catalog data, seeded once, installed by
+// copying into a real Automation/Trigger/Action for the caller's workspace.
+model AutomationTemplate {
+  id          String @id @default(cuid())
+  slug        String @unique
+  name        String
+  description String
+
+  // Same shape as CreateAutomationInput's triggers/actions arrays (see
+  // automations/dto), minus workspace/account-specific fields — installing
+  // a template just deserializes these into real Trigger/Action rows.
+  triggers Json
+  actions  Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// webhooks / event pipeline
+// ─────────────────────────────────────────────────────────────────────────
+
+model CommentEvent {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  instagramAccountId String
+  instagramAccount   InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  // Meta's event/comment ID — the dedup key. Unique constraint is the
+  // Postgres-level backstop behind the Redis SETNX dedup check (CLAUDE.md §3).
+  externalEventId String @unique
+
+  source    TriggerSource
+  mediaId   String?
+  fromUsername String
+  text      String @db.Text
+
+  status  CommentEventStatus @default(PENDING)
+  matchedAutomationId String?
+  matchedAutomation   Automation? @relation(fields: [matchedAutomationId], references: [id], onDelete: SetNull)
+
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  messageLogs MessageLog[]
+
+  @@index([workspaceId])
+  @@index([instagramAccountId, status])
+}
+
+enum CommentEventStatus {
+  PENDING
+  MATCHED
+  NO_MATCH
+  PROCESSED
+  FAILED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// messaging module
+// ─────────────────────────────────────────────────────────────────────────
+
+model MessageLog {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  instagramAccountId String
+  instagramAccount   InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  commentEventId String?
+  commentEvent   CommentEvent? @relation(fields: [commentEventId], references: [id], onDelete: SetNull)
+
+  actionType ActionType
+  recipientId String // IG-scoped user ID of the recipient
+  content     Json    // rendered message payload actually sent
+
+  status      MessageLogStatus @default(QUEUED)
+  attempt     Int @default(1)
+  graphApiResponse Json?
+  errorCode   String?
+
+  createdAt DateTime @default(now())
+  sentAt    DateTime?
+
+  @@index([workspaceId])
+  @@index([instagramAccountId, status])
+}
+
+enum MessageLogStatus {
+  QUEUED
+  SENT
+  FAILED
+  RATE_LIMITED
+  DEAD_LETTERED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// billing module
+// ─────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id   String @id @default(cuid())
+  slug String @unique // e.g. "free", "pro"
+  name String
+
+  monthlySendLimit Int // -1 = unlimited
+  aiFeaturesEnabled Boolean @default(false)
+  maxInstagramAccounts Int @default(1)
+
+  // On/off toggle map for the growing feature-parity build (see
+  // MANYCHAT_FEATURE_AUDIT.md) — e.g. {"live_comment_automation": true}.
+  // A JSON map instead of a typed column per feature: adding a new feature
+  // is a data change (one key), not a migration. Keys are defined once in
+  // billing/entitlements.constants.ts (FEATURE_KEYS) for compile-time
+  // safety at every call site; this column has no schema-level validation
+  // of its own. Checked exclusively through EntitlementsService.isEnabled
+  // (CLAUDE.md §8: single choke point, never duplicated per-module).
+  features Json @default("{}")
+
+  priceUsdCents Int? // Stripe pricing reference
+  priceInrPaise Int? // Razorpay pricing reference
+
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Subscription {
+  id          String @id @default(cuid())
+  workspaceId String @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  planId String
+  plan   Plan @relation(fields: [planId], references: [id])
+
+  provider           PaymentProviderType
+  providerCustomerId String?
+  providerSubscriptionId String?
+
+  status          SubscriptionStatus @default(ACTIVE)
+  currentPeriodEnd DateTime?
+  cancelAtPeriodEnd Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PaymentProviderType {
+  STRIPE
+  RAZORPAY
+  // The free plan's Subscription row has no real payment provider behind
+  // it — every Workspace gets one of these at creation (see
+  // EntitlementsService.ensureFreeSubscription) so entitlement checks always
+  // have a Subscription to resolve through, without a nullable `provider`
+  // column that every future Stripe/Razorpay read would need to guard against.
+  NONE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+model UsageRecord {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  sendsUsed  Int @default(0)
+  aiCallsUsed Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, periodStart])
+  @@index([workspaceId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// admin / audit
+// ─────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  actorUserId String?
+  actor       User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  action   String // e.g. "instagram.connect", "plan.change", "admin.override"
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId])
+}

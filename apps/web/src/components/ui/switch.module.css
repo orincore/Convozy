@@ -1,0 +1,96 @@
+/*
+ * Adapted from a uiverse.io switch component (CLAUDE.md §12b) - converted
+ * from styled-components to a CSS Module (not in our stack), remapped to
+ * the locked dark monochrome tokens from globals.css. The red/green
+ * indicator is kept as-is: semantic on/off state, exempt from the
+ * monochrome rule (CLAUDE.md §12a).
+ */
+
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.outer {
+  height: 44px;
+  width: 92px;
+  background: var(--color-muted);
+  border-radius: 165px;
+  box-shadow:
+    inset 0 5px 10px 0 rgb(0 0 0 / 0.5),
+    0 3px 6px -2px rgb(0 0 0 / 0.3);
+  border: 1px solid var(--color-border);
+  padding: 5px;
+  box-sizing: border-box;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.outer:has(.input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.input {
+  opacity: 0;
+  appearance: none;
+  position: absolute;
+}
+
+.button {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  position: relative;
+  justify-content: space-between;
+}
+
+.toggle {
+  height: 34px;
+  width: 34px;
+  background: linear-gradient(#3f3f46, #232326);
+  border-radius: 100%;
+  box-shadow:
+    inset 0 2px 3px 0 rgb(255 255 255 / 0.08),
+    0 4px 12px 0 rgb(0 0 0 / 0.5);
+  position: relative;
+  z-index: 2;
+  transition: left 0.3s ease-in;
+  left: 0;
+}
+
+.input:checked + .button .toggle {
+  left: 58%;
+}
+
+.input:checked + .button .indicator {
+  animation: indicator 0.6s forwards;
+}
+
+.indicator {
+  height: 18px;
+  width: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  border: 3px solid var(--color-danger);
+  box-sizing: border-box;
+  right: 8px;
+  position: relative;
+  opacity: 1;
+}
+
+@keyframes indicator {
+  30% {
+    opacity: 0;
+  }
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    border-color: var(--color-success);
+    left: -60%;
+  }
+}

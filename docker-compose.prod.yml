@@ -1,0 +1,61 @@
+# Production overrides. Usage: see infra/scripts/deploy.sh
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Sized for a Hostinger KVM 2 VPS (2 vCPU / 8GB RAM / 100GB NVMe) — see
+# TRACKER.md Decisions log. Revisit these limits if/when the VPS is upgraded
+# or `docker stats` shows a service consistently pinned at its cap.
+#
+# NOTE: `deploy.replicas` only takes effect under Docker Swarm. For a plain
+# `docker compose up` (which is what we use), scale the worker with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --scale worker=2
+# infra/scripts/deploy.sh already does this.
+#
+# Differences from dev:
+#  - No exposed DB/Redis ports (internal network only)
+#  - Memory/CPU caps set so no single service can starve the others on a
+#    2 vCPU / 8GB box
+#  - Restart policy tightened, no bind-mounted source
+
+services:
+  postgres:
+    # Compose merges list fields (like `ports`) by concatenation across -f
+    # files by default, NOT replacement — a plain `ports: []` here would
+    # never actually clear docker-compose.yml's "5432:5432", silently
+    # leaving Postgres exposed on the host. `!override` forces a real
+    # replace. (Found the hard way: this shipped unbuild-tested until the
+    # first real deploy — see TRACKER.md Phase 9.)
+    ports: !override []
+    mem_limit: 1g
+    cpus: 0.5
+
+  redis:
+    ports: !override []
+    mem_limit: 512m
+    cpus: 0.25
+
+  api:
+    ports: !override []
+    mem_limit: 512m
+    cpus: 0.5
+
+  worker:
+    # Run 2 replicas by default on a 2 vCPU box (see NOTE above for how).
+    # Prefer raising QUEUE_CONCURRENCY_* env vars before adding a 3rd
+    # replica — more in-process concurrency is cheaper than another
+    # container on this VPS size.
+    mem_limit: 512m
+    cpus: 0.5
+
+  web:
+    mem_limit: 512m
+    cpus: 0.5
+
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+    mem_limit: 128m
+    cpus: 0.25

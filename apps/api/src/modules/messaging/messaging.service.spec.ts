@@ -1,0 +1,286 @@
+jest.mock('@nestjs/common', () => {
+  class HttpException extends Error {
+    constructor(
+      public response: unknown,
+      public status: number,
+    ) {
+      super(typeof response === 'string' ? response : JSON.stringify(response));
+    }
+  }
+  class Logger {
+    log = jest.fn();
+    debug = jest.fn();
+    warn = jest.fn();
+    error = jest.fn();
+  }
+  return {
+    Injectable: () => () => {},
+    Inject: () => () => {},
+    Global: () => () => {},
+    Module: () => () => {},
+    Logger,
+    HttpException,
+    HttpStatus: { BAD_REQUEST: 400, NOT_FOUND: 404, CONFLICT: 409, FORBIDDEN: 403 },
+  };
+});
+jest.mock('@nestjs/config', () => ({ ConfigService: class {} }));
+
+import { ActionType, MessageLogStatus } from '@prisma/client';
+import { MessagingService } from './messaging.service';
+
+function makeConfigService() {
+  return { get: jest.fn(() => ({ graphApiVersion: 'v21.0' })) } as any;
+}
+
+function makeJob(data: Record<string, unknown>, attemptsMade = 0) {
+  return { data, attemptsMade } as any;
+}
+
+function makeService(overrides: {
+  circuitOpen?: boolean;
+  rateLimitAllowed?: boolean;
+  credentials?: { accessToken: string; igBusinessId: string } | null;
+} = {}) {
+  const prisma = { messageLog: { create: jest.fn() } } as any;
+  const instagramService = {
+    getSendCredentials: jest.fn().mockResolvedValue(
+      overrides.credentials !== undefined
+        ? overrides.credentials
+        : { accessToken: 'token-abc', igBusinessId: 'ig-user-1' },
+    ),
+  } as any;
+  const rateLimiter = {
+    tryConsume: jest.fn().mockResolvedValue({ allowed: overrides.rateLimitAllowed ?? true, retryAfterSeconds: 120 }),
+  } as any;
+  const circuitBreaker = {
+    isOpen: jest.fn().mockResolvedValue(overrides.circuitOpen ?? false),
+    recordSuccess: jest.fn(),
+    recordFailure: jest.fn(),
+  } as any;
+
+  const service = new MessagingService(prisma, makeConfigService(), instagramService, rateLimiter, circuitBreaker);
+  return { service, prisma, instagramService, rateLimiter, circuitBreaker };
+}
+
+describe('MessagingService.send', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  it('sends a private reply for SEND_DM to the correct endpoint/body and records SENT', async () => {
+    const { service, prisma, circuitBreaker } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ message_id: 'mid-1' }) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'comment-123',
+        recipientType: 'comment',
+        actionType: ActionType.SEND_DM,
+        content: { text: 'hi there' },
+        commentEventId: 'ce-1',
+      }),
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://graph.instagram.com/v21.0/ig-user-1/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer token-abc' }),
+        body: JSON.stringify({ recipient: { comment_id: 'comment-123' }, message: { text: 'hi there' } }),
+      }),
+    );
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.SENT, attempt: 1 }) }),
+    );
+    expect(circuitBreaker.recordSuccess).toHaveBeenCalledWith('account-1');
+  });
+
+  it('sends a public reply for REPLY_COMMENT to the /{comment-id}/replies endpoint', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'reply-1' }) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'comment-123',
+        recipientType: 'comment',
+        actionType: ActionType.REPLY_COMMENT,
+        content: { text: 'thanks!' },
+      }),
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://graph.instagram.com/v21.0/comment-123/replies',
+      expect.objectContaining({ body: JSON.stringify({ message: 'thanks!' }) }),
+    );
+  });
+
+  it('sends into a conversation with a plain user id for a story-reply/DM-sourced event', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
+        actionType: ActionType.SEND_DM,
+        content: { text: 'thanks for replying to our story!' },
+      }),
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://graph.instagram.com/v21.0/ig-user-1/messages',
+      expect.objectContaining({
+        body: JSON.stringify({
+          recipient: { id: 'ig-scoped-user-1' },
+          message: { text: 'thanks for replying to our story!' },
+        }),
+      }),
+    );
+  });
+
+  it('rejects REPLY_COMMENT for a conversation-sourced (non-comment) recipient rather than sending a malformed request', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn() as any;
+
+    await expect(
+      service.send(
+        makeJob({
+          workspaceId: 'workspace-1',
+          instagramAccountId: 'account-1',
+          recipientId: 'ig-scoped-user-1',
+          recipientType: 'user',
+          actionType: ActionType.REPLY_COMMENT,
+          content: { text: 'thanks!' },
+        }),
+      ),
+    ).rejects.toThrow(/requires a comment-sourced event/);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('appends buttons as plain text links instead of guessing at an unverified template shape', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'comment-123',
+        actionType: ActionType.SEND_DM,
+        content: { text: 'here', buttons: [{ title: 'Shop', url: 'https://example.com' }] },
+      }),
+    );
+
+    const call = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.message.text).toBe('here\n\nShop: https://example.com');
+  });
+
+  it('short-circuits without calling fetch when the circuit is open', async () => {
+    const { service, prisma, circuitBreaker } = makeService({ circuitOpen: true });
+    global.fetch = jest.fn() as any;
+
+    await expect(service.send(makeJob({ instagramAccountId: 'account-1', actionType: ActionType.SEND_DM }))).rejects.toThrow(
+      /Circuit open/,
+    );
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(circuitBreaker.recordFailure).not.toHaveBeenCalled(); // breaker already open — not a new failure
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.RATE_LIMITED, errorCode: 'CIRCUIT_OPEN' }) }),
+    );
+  });
+
+  it('short-circuits without calling fetch when the rate limit is exceeded', async () => {
+    const { service, prisma } = makeService({ rateLimitAllowed: false });
+    global.fetch = jest.fn() as any;
+
+    await expect(
+      service.send(makeJob({ instagramAccountId: 'account-1', actionType: ActionType.SEND_DM })),
+    ).rejects.toThrow(/Rate limit exceeded/);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ errorCode: 'RATE_LIMIT_EXCEEDED' }) }),
+    );
+  });
+
+  it('records FAILED and returns (no throw) when the account has no usable credentials', async () => {
+    const { service, prisma } = makeService({ credentials: null });
+    global.fetch = jest.fn() as any;
+
+    await expect(
+      service.send(makeJob({ instagramAccountId: 'account-1', actionType: ActionType.SEND_DM })),
+    ).resolves.toBeUndefined();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ errorCode: 'INSTAGRAM_ACCOUNT_UNAVAILABLE' }) }),
+    );
+  });
+
+  it('records the failure, trips the breaker, and rethrows on a Graph API error', async () => {
+    const { service, prisma, circuitBreaker } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { message: 'Invalid parameter' } }),
+    }) as any;
+
+    await expect(
+      service.send(
+        makeJob({
+          workspaceId: 'workspace-1',
+          instagramAccountId: 'account-1',
+          recipientId: 'comment-123',
+          actionType: ActionType.SEND_DM,
+          content: { text: 'hi' },
+        }),
+      ),
+    ).rejects.toThrow('Invalid parameter');
+
+    expect(circuitBreaker.recordFailure).toHaveBeenCalledWith('account-1');
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.FAILED, errorCode: 'Invalid parameter' }) }),
+    );
+  });
+
+  it('classifies a 429 Graph API response as RATE_LIMITED in the MessageLog', async () => {
+    const { service, prisma } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: 'Too many calls' } }),
+    }) as any;
+
+    await expect(
+      service.send(makeJob({ instagramAccountId: 'account-1', actionType: ActionType.SEND_DM, content: { text: 'hi' } })),
+    ).rejects.toThrow();
+
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.RATE_LIMITED }) }),
+    );
+  });
+
+  it('uses job.attemptsMade + 1 as the MessageLog attempt number', async () => {
+    const { service, prisma } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({ instagramAccountId: 'account-1', actionType: ActionType.SEND_DM, content: { text: 'hi' } }, 3),
+    );
+
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ attempt: 4 }) }),
+    );
+  });
+});

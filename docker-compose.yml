@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-convozy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convozy}
+      POSTGRES_DB: ${POSTGRES_DB:-convozy}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-convozy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-convozy}:${POSTGRES_PASSWORD:-convozy}@postgres:5432/${POSTGRES_DB:-convozy}
+      REDIS_HOST: redis
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-convozy}:${POSTGRES_PASSWORD:-convozy}@postgres:5432/${POSTGRES_DB:-convozy}
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Scale with: docker compose up --scale worker=4
+    deploy:
+      replicas: 1
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web.Dockerfile
+      # Build ARG, not a runtime `environment:` entry: NEXT_PUBLIC_* vars are
+      # inlined into the JS bundle at `next build` time, so this has to
+      # reach the build process itself, not just the running container —
+      # see web.Dockerfile for the full story. Compose reads
+      # NEXT_PUBLIC_API_BASE_URL from .env automatically (same directory);
+      # the fallback here is the dev default.
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3000/api}
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3001:3001"
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:

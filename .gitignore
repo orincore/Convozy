@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Env files (never commit real secrets)
+.env
+.env.*
+!.env.example
+
+# OAuth client secret files downloaded from Google Cloud Console
+client_secret_*.json
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Prisma
+apps/api/prisma/migrations/dev.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Testing
+coverage/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Turborepo (if enabled later)
+.turbo/
