@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ContactsService } from '../../modules/contacts/contacts.service';
 import { QueueName } from '../constants';
 import { AutomationMatchJobData } from './automation-match.processor';
 
@@ -12,6 +13,12 @@ export interface WebhookEventJobData {
   source: 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT';
   mediaId?: string;
   fromUsername: string;
+  // The commenter/sender's IG-scoped user ID — Contact rows are keyed on
+  // this. Nullable: additive, and comment-sourced events before this field
+  // existed won't have it until Meta redelivers (see CommentEvent's own
+  // comment). For STORY_REPLY this is the same value as fromUsername (that
+  // field already carries the IG-scoped ID for conversation-sourced events).
+  fromIgScopedId?: string;
   text: string;
   receivedAt: string;
 }
@@ -26,6 +33,7 @@ export class WebhookEventsProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly contactsService: ContactsService,
     @InjectQueue(QueueName.AUTOMATION_MATCH)
     private readonly automationMatchQueue: Queue<AutomationMatchJobData>,
   ) {
@@ -57,6 +65,7 @@ export class WebhookEventsProcessor extends WorkerHost {
           source: data.source,
           mediaId: data.mediaId,
           fromUsername: data.fromUsername,
+          fromIgScopedId: data.fromIgScopedId,
           text: data.text,
           receivedAt: new Date(data.receivedAt),
         },
@@ -73,6 +82,25 @@ export class WebhookEventsProcessor extends WorkerHost {
       }
       throw err;
     }
+
+    // Fires for every inbound event, matched or not — a Contact should
+    // exist for anyone who has ever interacted, not just people an
+    // automation happened to reply to. Non-fatal: contact tracking must
+    // never block the core comment-to-DM pipeline (same principle as the
+    // non-fatal subscribeToWebhooks call in InstagramService). STORY_REPLY's
+    // fromUsername is actually the sender's numeric IG-scoped ID (no real
+    // username available in that webhook payload — see mapMessagingEventToJobData),
+    // so it's never passed as a display username here.
+    await this.contactsService
+      .recordInbound(
+        account.workspaceId,
+        data.instagramAccountId,
+        data.fromIgScopedId,
+        data.source === 'STORY_REPLY' ? undefined : data.fromUsername,
+      )
+      .catch((err) => {
+        this.logger.error(`Contact tracking failed for event ${data.externalEventId}: ${(err as Error).message}`);
+      });
 
     await this.automationMatchQueue.add(
       'match',

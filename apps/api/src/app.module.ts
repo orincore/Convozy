@@ -17,6 +17,7 @@ import { InstagramModule } from './modules/instagram/instagram.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AutomationsModule } from './modules/automations/automations.module';
 import { ActivityModule } from './modules/activity/activity.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 
 /**
  * Root module for the API (HTTP) entrypoint (main.ts). See worker.module.ts
@@ -41,6 +42,7 @@ import { ActivityModule } from './modules/activity/activity.module';
     WebhooksModule,
     AutomationsModule,
     ActivityModule,
+    ContactsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

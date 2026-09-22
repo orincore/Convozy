@@ -55,6 +55,10 @@ model Workspace {
   subscription       Subscription?
   usageRecords       UsageRecord[]
   auditLogs          AuditLog[]
+  contacts           Contact[]
+  tags               Tag[]
+  customFields       CustomField[]
+  segments           Segment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -98,6 +102,7 @@ model InstagramAccount {
   automations   Automation[]
   commentEvents CommentEvent[]
   messageLogs   MessageLog[]
+  contacts      Contact[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -292,6 +297,13 @@ model CommentEvent {
   source    TriggerSource
   mediaId   String?
   fromUsername String
+  // The commenter/sender's IG-scoped user ID — the stable key Contact rows
+  // are upserted on. Nullable: additive column, and comment-sourced events
+  // before this field existed won't have it until Meta redelivers. Already
+  // captured for STORY_REPLY (via fromUsername historically) but comments
+  // dropped `change.value.from.id` entirely before this — see
+  // WebhooksController.mapChangeToJobData.
+  fromIgScopedId String?
   text      String @db.Text
 
   status  CommentEventStatus @default(PENDING)
@@ -439,6 +451,134 @@ model UsageRecord {
 
   @@unique([workspaceId, periodStart])
   @@index([workspaceId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// contacts module (Milestone 2, MANYCHAT_FEATURE_AUDIT.md §7 Segmentation)
+// ─────────────────────────────────────────────────────────────────────────
+
+// One row per (workspace, IG account, sender) — created/updated by
+// ContactsService.recordInbound, called from WebhookEventsProcessor for
+// every inbound event (comment, live comment, story reply), regardless of
+// whether it matches an automation. igScopedId is the same stable ID
+// CommentEvent.fromIgScopedId/fromUsername (for STORY_REPLY) already carry.
+model Contact {
+  id                 String @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccountId String
+  instagramAccount   InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  igScopedId String
+  username   String?
+
+  // Drives Milestone 8's real-time broadcast-eligibility check (Instagram
+  // has no message-tag mechanism to message outside the 24h window) and
+  // Milestone 7's sequence exit-on-reply — tracked here since both need it
+  // and neither owns the concept alone.
+  lastInboundAt  DateTime?
+  lastOutboundAt DateTime?
+
+  tags        ContactTag[]
+  fieldValues ContactFieldValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, instagramAccountId, igScopedId])
+  @@index([workspaceId])
+}
+
+model Tag {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name  String
+  color String?
+
+  contacts ContactTag[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, name])
+}
+
+model ContactTag {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([contactId, tagId])
+}
+
+model CustomField {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  key   String // machine key, e.g. "shirt_size"
+  label String // display label, e.g. "Shirt size"
+  type  CustomFieldType
+
+  values ContactFieldValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, key])
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  DATE
+}
+
+model ContactFieldValue {
+  id            String @id @default(cuid())
+  contactId     String
+  contact       Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  customFieldId String
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  // Stored as text regardless of CustomField.type (matches the app-layer
+  // validation-then-serialize pattern already used for Action.payload/
+  // Trigger.keywords rather than adding one nullable typed column per
+  // CustomFieldType) — validated against the field's declared type in
+  // ContactsService before writing.
+  value String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([contactId, customFieldId])
+}
+
+// A saved filter over Contacts, evaluated at read time (not a materialized
+// membership table) so it's never stale — SegmentsService.evaluateMembers
+// translates `rules` into a Prisma `where` on demand. Consumed by
+// Milestone 8's Broadcasts (segmentId = null means "all contacts").
+model Segment {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  name String
+  // SegmentRule tree: { all: SegmentRule[] } | { any: SegmentRule[] } |
+  // { tag: string } | { field: { key, op, value } } — see
+  // contacts/dto/segment-rule.dto.ts for the validated shape.
+  rules Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, name])
 }
 
 // ─────────────────────────────────────────────────────────────────────────

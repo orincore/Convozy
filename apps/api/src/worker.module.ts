@@ -9,6 +9,7 @@ import { QueueModule } from './queues/queue.module';
 import { InstagramModule } from './modules/instagram/instagram.module';
 import { AutomationsModule } from './modules/automations/automations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
+import { ContactsModule } from './modules/contacts/contacts.module';
 import { WebhookEventsProcessor } from './queues/processors/webhook-events.processor';
 import { AutomationMatchProcessor } from './queues/processors/automation-match.processor';
 import { MessageSendProcessor } from './queues/processors/message-send.processor';
@@ -36,6 +37,7 @@ import { TokenRefreshProcessor } from './queues/processors/token-refresh.process
     InstagramModule,
     AutomationsModule,
     MessagingModule,
+    ContactsModule,
   ],
   providers: [
     WebhookEventsProcessor,

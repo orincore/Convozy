@@ -247,3 +247,117 @@ export interface ActivityEvent {
 export const activityApi = {
   list: () => authFetch<ActivityEvent[]>('/activity'),
 };
+
+// ── Contacts / Tags / Custom Fields / Segments (Milestone 2) ──────────────
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CustomFieldType = 'TEXT' | 'NUMBER' | 'BOOLEAN' | 'DATE';
+
+export interface CustomField {
+  id: string;
+  key: string;
+  label: string;
+  type: CustomFieldType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContactFieldValue {
+  id: string;
+  value: string;
+  customField: CustomField;
+}
+
+export interface Contact {
+  id: string;
+  instagramAccountId: string;
+  igScopedId: string;
+  username: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
+  tags: { tagId: string; tag: Tag }[];
+  fieldValues: ContactFieldValue[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListContactsResult {
+  contacts: Contact[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+// Mirrors SegmentRuleOp/SegmentRuleDto on the backend (contacts/dto/segment-rule.dto.ts).
+export type SegmentRuleOp = 'eq' | 'neq' | 'contains';
+
+export interface SegmentFieldRule {
+  key: string;
+  op: SegmentRuleOp;
+  value: string;
+}
+
+export interface SegmentRule {
+  all?: SegmentRule[];
+  any?: SegmentRule[];
+  tag?: string;
+  field?: SegmentFieldRule;
+}
+
+export interface Segment {
+  id: string;
+  name: string;
+  rules: SegmentRule;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const tagsApi = {
+  list: () => authFetch<Tag[]>('/tags'),
+  create: (input: { name: string; color?: string }) =>
+    authFetch<Tag>('/tags', { method: 'POST', body: JSON.stringify(input) }),
+  remove: (id: string) => authFetch<void>(`/tags/${id}`, { method: 'DELETE' }),
+};
+
+export const customFieldsApi = {
+  list: () => authFetch<CustomField[]>('/custom-fields'),
+  create: (input: { key: string; label: string; type: CustomFieldType }) =>
+    authFetch<CustomField>('/custom-fields', { method: 'POST', body: JSON.stringify(input) }),
+  remove: (id: string) => authFetch<void>(`/custom-fields/${id}`, { method: 'DELETE' }),
+};
+
+export const contactsApi = {
+  list: (query: { instagramAccountId?: string; tagId?: string; segmentId?: string; page?: number } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined) params.set(k, String(v));
+    });
+    const qs = params.toString();
+    return authFetch<ListContactsResult>(`/contacts${qs ? `?${qs}` : ''}`);
+  },
+  get: (id: string) => authFetch<Contact>(`/contacts/${id}`),
+  addTag: (id: string, tagId: string) => authFetch<void>(`/contacts/${id}/tags/${tagId}`, { method: 'POST' }),
+  removeTag: (id: string, tagId: string) => authFetch<void>(`/contacts/${id}/tags/${tagId}`, { method: 'DELETE' }),
+  setField: (id: string, customFieldId: string, value: string) =>
+    authFetch<void>(`/contacts/${id}/fields/${customFieldId}`, { method: 'PATCH', body: JSON.stringify({ value }) }),
+};
+
+export const segmentsApi = {
+  list: () => authFetch<Segment[]>('/segments'),
+  get: (id: string) => authFetch<Segment>(`/segments/${id}`),
+  create: (input: { name: string; rules: SegmentRule }) =>
+    authFetch<Segment>('/segments', { method: 'POST', body: JSON.stringify(input) }),
+  update: (id: string, input: Partial<{ name: string; rules: SegmentRule }>) =>
+    authFetch<Segment>(`/segments/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  remove: (id: string) => authFetch<void>(`/segments/${id}`, { method: 'DELETE' }),
+  members: (id: string, page?: number) =>
+    authFetch<{ contacts: Contact[]; total: number }>(`/segments/${id}/members${page ? `?page=${page}` : ''}`),
+  count: (id: string) => authFetch<{ count: number }>(`/segments/${id}/count`),
+};

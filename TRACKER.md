@@ -343,6 +343,28 @@ scoping new phases/features rather than re-researching ManyChat from scratch.
   change, independent of the not-yet-deployed Phase 5.1 work below) —
   `api` container rebuilt + restarted, `/health` → 200, user confirmed live
   "now its working" after posting a fresh test comment.
+- ⛔ **Known limitation, verified live (2026-09-24): collaboration posts
+  don't appear in the "Applies to → Specific posts" picker.** Root cause:
+  `InstagramService.listRecentMedia` only calls `GET /{ig-user-id}/media`,
+  which per Meta's own docs and community forum only returns media the
+  account *published* — a genuine collab post (this account is a
+  collaborator, not the original publisher) never appears there, even
+  though Instagram's own app shows it on the collaborator's profile. Meta
+  does have a dedicated `GET /<IG_USER_ID>/collaborative_media` endpoint
+  (launched April 2026), but it's documented only under "Instagram API with
+  Facebook Login" (`graph.facebook.com`, Page-linked). **Tested live against
+  the real connected account (`ig_orincore`, 2026-09-24)** on
+  `graph.instagram.com` (the host Convozy's Business Login for Instagram
+  flow actually uses): `400 {"error":{"message":"Tried accessing
+  nonexisting field (collaborative_media)"}}` — a clean "field doesn't
+  exist on this host," not a permissions error. Fixing this for real would
+  mean adding the Facebook-Login-linked connection flow alongside (not
+  instead of — Business Login for Instagram is still needed for everything
+  else) the current one, since that earlier flow was already tried and
+  explicitly abandoned once this session (see the Phase 1 "wrong-App-ID"
+  diagnosis above) for not being viable for this app. Real scope, not a
+  quick fix — flagged here rather than silently dropped, not attempted
+  without the user explicitly asking for the dual-connection-flow work.
 
 ## Phase 2 — Automation engine
 
