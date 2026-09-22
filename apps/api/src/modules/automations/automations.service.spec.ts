@@ -260,6 +260,78 @@ describe('AutomationsService.matchCommentEvent', () => {
     expect(messageSendQueue.add).not.toHaveBeenCalled();
   });
 
+  it('a CONTAINS trigger with no keywords matches any comment text (user directive, 2026-09-24)', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'literally anything at all' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.COMMENT,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: [],
+            caseSensitive: false,
+            aiIntentLabel: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalled();
+  });
+
+  it('an EXACT trigger with no keywords matches any comment text', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'literally anything at all' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.COMMENT,
+            matchType: TriggerMatchType.EXACT,
+            keywords: [],
+            caseSensitive: false,
+            aiIntentLabel: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalled();
+  });
+
+  it('a REGEX trigger with no keywords still never matches (no sensible "match anything" pattern)', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'literally anything at all' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.COMMENT,
+            matchType: TriggerMatchType.REGEX,
+            keywords: [],
+            caseSensitive: false,
+            aiIntentLabel: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
+
   it('does not match when scoped to specific posts and the comment is on a different post', async () => {
     const { service, prisma, messageSendQueue } = makeService();
     prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ mediaId: 'other-media' }));
@@ -543,6 +615,36 @@ describe('AutomationsService condition/branching — dispatch', () => {
     const { service, prisma, messageSendQueue } = makeService();
     prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'what is the PRICE?' }));
     prisma.automation.findMany.mockResolvedValue([makeAutomation({ actions: [makeConditionAction()] })]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'THEN branch fired' }) }),
+      expect.any(Object),
+    );
+  });
+
+  it('a CONTAINS condition with no keywords always evaluates true (routes to THEN)', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'price, anything else' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          makeConditionAction({
+            condition: {
+              id: 'condition-1',
+              actionId: 'condition-action-1',
+              matchType: TriggerMatchType.CONTAINS,
+              field: ConditionField.COMMENT_TEXT,
+              keywords: [],
+              caseSensitive: false,
+              aiIntentLabel: null,
+            },
+          }),
+        ],
+      }),
+    ]);
 
     await service.matchCommentEvent('comment-event-1');
 

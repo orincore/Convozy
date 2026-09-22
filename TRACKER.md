@@ -591,14 +591,19 @@ Plan: `/Users/orincore/.claude-client1/plans/vectorized-growing-perlis.md`.
 Everything ships free today — this only builds the mechanism to gate a
 feature later via data, not code.
 
-- ▶ **Code done, tests passing, NOT yet deployed** (no migration applied to
-  any database, not even local):
+- ✅ **Deployed and verified live (2026-09-24).** Code done, tests passing,
+  migration applied to both local dev and production. Found late: this
+  module had actually never made it to the VPS (only coded/tested locally),
+  which meant production's `automations.service.ts`/`auth.service.ts` were
+  silently running without the `EntitlementsService` dependency they'd
+  otherwise need — caught and fixed as part of the git-based deploy sync
+  below, before it could cause a real production failure.
   - `Plan.features Json @default("{}")` + `PaymentProviderType.NONE` +
     `AutomationTemplate` model added to `schema.prisma`; hand-written
     additive migration at
     `apps/api/prisma/migrations/20260923010000_billing_features_and_templates/`
-    — `npx prisma generate` run locally for TS types, migration itself not
-    yet run anywhere.
+    — applied via `prisma migrate deploy` on both local dev and production
+    2026-09-24.
   - `billing` module: `entitlements.constants.ts` (`FEATURE_KEYS`:
     `LIVE_COMMENT_AUTOMATION`, `AUTOMATION_TEMPLATES`), `entitlements.service.ts`
     (`EntitlementsService.isEnabled`/`ensureFreeSubscription`/idempotent
@@ -624,20 +629,78 @@ feature later via data, not code.
   asserts the subscribe call's `subscribed_fields` param includes it.
   Frontend already had "Live comment" as a selectable trigger source
   (Phase 4) — this was the only missing wiring.
-- ☐ **Not started**: automation templates (Part 3 of the plan) — global
-  `AutomationTemplate` catalog seed, `GET /automations/templates` +
-  `POST /automations/templates/:id/install` (entitlement-gated behind
-  `AUTOMATION_TEMPLATES`), frontend template picker on
-  `automations/new/page.tsx` (needs a `taste-skill` pass, CLAUDE.md §12).
-- ☐ **Deploy blocked on user go-ahead** (per the session's established
-  scp + `docker cp` + `prisma migrate deploy` pattern — no local Docker
-  Postgres detour). After deploy: ask the user to **reconnect their test
-  Instagram account** (documented one-time manual step — `subscribeToWebhooks`
-  only re-subscribes at connect time, so the already-connected account won't
-  pick up `live_comments` otherwise).
-- Explicitly deferred (not in scope this batch): Contacts/Segmentation,
-  Condition/branching in the Flow Builder, Broadcasts, Follow-to-DM — see
-  the plan file for why each needs its own design pass first.
+- ☐ **Automation templates still not started** — now Milestone 3 of the
+  full feature-parity plan below, not built yet.
+- ✅ Deployed 2026-09-24 (see Phase 5.2's deploy notes for the mechanics).
+  **Still needed**: ask the user to **reconnect their test Instagram
+  account** (`subscribeToWebhooks` only re-subscribes at connect time, so
+  an already-connected account won't pick up `live_comments` otherwise).
+
+---
+
+### Phase 5.2 — Full ManyChat feature-parity build (user directive, 2026-09-23)
+
+User directive: implement every free/paid Instagram-relevant feature in
+`MANYCHAT_FEATURE_AUDIT.md`, completely (CLAUDE.md §14, added this session —
+no shortcuts, every real option a feature needs), **one feature at a time**
+(explicit correction mid-session — not all at once). Full 10-milestone plan
+approved via plan mode: `/Users/orincore/.claude-client2/plans/elegant-watching-summit.md`.
+Page-inventory companion doc: [`ui.md`](./ui.md) (ManyChat's dashboard page
+list researched 2026-09-23, mapped to Convozy equivalents/gaps — Convozy
+only has 3 logged-in pages today; a Settings/Profile/Billing page is a real
+gap this surfaced that isn't in the 10-milestone list yet, see `ui.md` §4).
+
+**Milestone 1 — Condition/branching step: ✅ done, deployed, verified live (2026-09-24).**
+- Schema (additive migration `20260924010000_condition_branching`):
+  `ActionType.CONDITION`, `ActionBranch{THEN,ELSE}`, `ConditionField`
+  (`COMMENT_TEXT`/`SENDER_USERNAME` only for now — `IS_FOLLOWER` etc. are
+  additive later), `Action.parentActionId`/`branch` (self-relation tree,
+  cascade delete), new `Condition` model mirroring `Trigger`'s match-type
+  semantics exactly (including the honest `AI_INTENT` stub) — CLAUDE.md §14's
+  own test case: branching supports every option a trigger does.
+- Backend: `AutomationsService` gained `dispatchActionTree`/`conditionMatches`
+  (shares the same `vm`-sandboxed regex-timeout matching as triggers),
+  `validateActionTree` (`MAX_ACTION_TREE_DEPTH = 5`, explicit documented
+  bound), and switched `create`/`update` to explicit recursive
+  `tx.action.create()` calls instead of a single nested Prisma write — a
+  self-referential `children` relation can't be combined with Prisma
+  auto-populating the unrelated `automationId` FK on deeply nested rows.
+- **Real bug found and fixed during browser verification** (not just
+  reasoned about): the `actions` relation query had no `where: {parentActionId: null}`
+  filter, so Prisma returned every Action row flat (including ones already
+  nested under a CONDITION's `children`) — a THEN/ELSE action would fire a
+  *second* time, unconditionally, as if it were a root action. Caught live
+  via a Playwright browser test creating a real branching automation and
+  inspecting the API response, not just from code review. Fixed
+  (`ACTIONS_INCLUDE`'s root-level `where` clause) and covered by a new
+  regression test asserting the query shape directly (mocked-Prisma unit
+  tests can't otherwise catch this class of bug).
+- Frontend: new recursive `components/automations/action-step-editor.tsx`
+  (THEN/ELSE tree editor), two new primitives `components/ui/select.tsx` /
+  `badge.tsx` (uiverse.io returns 403 to WebFetch in this environment,
+  confirmed again — built bespoke on the existing token system instead, per
+  the established fallback), wired into `automations/new/page.tsx`.
+- Verified: 105/105 backend tests, clean `tsc`/lint (both apps), full
+  frontend build, and an end-to-end browser test (Playwright, headless)
+  creating a real branching automation through the actual UI, round-tripped
+  through the real API against local Postgres, confirming the persisted
+  tree structure and dispatch logic are correct.
+- **Deploy mechanics changed mid-milestone**: the user published the repo to
+  GitHub (`https://github.com/orincore/Convozy.git`) and asked for git-based
+  deploys instead of scp. Converted `/root/convozy` on the VPS to a real git
+  checkout (safely — `git reset` then `git checkout main -- .`, never a
+  destructive `git checkout -f`; `.env`/`docker-compose.vps.yml`/
+  `web.Dockerfile` aren't tracked and were confirmed untouched). This sync
+  also surfaced and fixed the fact that Phase 5.1's entire billing module had
+  never actually reached the VPS despite being "done" locally for hours —
+  see Phase 5.1's note above. New durable deploy pattern recorded in memory.
+
+**Milestones 2–10 (segmentation/tags, templates, comments growth tool,
+require-follow-gate, sequences, broadcasts, external-request step,
+analytics; Follow-to-DM dropped — no Meta webhook/endpoint exists for it,
+verified live against current docs)**: not started, full detail in the plan
+file. Building **one at a time**, next up is Milestone 2 once the user
+confirms readiness to continue.
 
 ## Phase 6 — AI features
 

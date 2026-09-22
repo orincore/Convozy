@@ -415,9 +415,20 @@ export class AutomationsService {
   ): boolean {
     switch (matchType) {
       case TriggerMatchType.EXACT:
-        return keywords.some((kw) => this.normalize(kw, caseSensitive) === this.normalize(text.trim(), caseSensitive));
       case TriggerMatchType.CONTAINS:
-        return keywords.some((kw) => this.normalize(text, caseSensitive).includes(this.normalize(kw, caseSensitive)));
+        // No keyword configured = nothing to check against, so treat it as
+        // "run on every comment" rather than "never matches" (user
+        // directive, 2026-09-24) — an empty keyword list is a deliberate
+        // unconditional trigger/condition, not a misconfiguration. REGEX
+        // has no equivalent fallback (there's no sensible "match anything"
+        // pattern to assume) and is rejected at write time instead — see
+        // validateTriggers/validateActionTree.
+        if (keywords.length === 0) {
+          return true;
+        }
+        return matchType === TriggerMatchType.EXACT
+          ? keywords.some((kw) => this.normalize(kw, caseSensitive) === this.normalize(text.trim(), caseSensitive))
+          : keywords.some((kw) => this.normalize(text, caseSensitive).includes(this.normalize(kw, caseSensitive)));
       case TriggerMatchType.REGEX:
         return this.regexMatches(keywords, caseSensitive, text, entityId);
       case TriggerMatchType.AI_INTENT:

@@ -44,8 +44,8 @@ const TRIGGER_SOURCES: { value: TriggerSource; label: string }[] = [
 ];
 
 const MATCH_TYPES: { value: TriggerMatchType; label: string; hint: string }[] = [
-  { value: 'CONTAINS', label: 'Contains', hint: 'Matches if the message includes any keyword' },
-  { value: 'EXACT', label: 'Exact match', hint: 'Matches only if the message is exactly one keyword' },
+  { value: 'CONTAINS', label: 'Contains', hint: 'Matches if the message includes any keyword — leave blank to match every comment' },
+  { value: 'EXACT', label: 'Exact match', hint: 'Matches only if the message is exactly one keyword — leave blank to match every comment' },
   { value: 'REGEX', label: 'Regex', hint: 'First keyword is used as a regular expression' },
 ];
 
@@ -246,8 +246,11 @@ export default function NewAutomationPage() {
       setError('Connect an Instagram account first.');
       return;
     }
-    if (triggers.some((t) => t.keywords.trim() === '')) {
-      setError('Every trigger needs at least one keyword.');
+    // Only REGEX needs a keyword — it's the pattern, there's no sensible
+    // "match anything" fallback. EXACT/CONTAINS with no keyword is a
+    // deliberate unconditional trigger (matches every comment).
+    if (triggers.some((t) => t.matchType === 'REGEX' && t.keywords.trim() === '')) {
+      setError('Regex triggers need a pattern.');
       return;
     }
     const actionStepsError = validateActionSteps(actionSteps);

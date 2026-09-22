@@ -25,8 +25,8 @@ const CONDITION_FIELDS: { value: ConditionField; label: string }[] = [
 ];
 
 const CONDITION_MATCH_TYPES: { value: TriggerMatchType; label: string; hint: string }[] = [
-  { value: 'CONTAINS', label: 'Contains', hint: 'True if the field includes any keyword' },
-  { value: 'EXACT', label: 'Exact match', hint: 'True only if the field is exactly one keyword' },
+  { value: 'CONTAINS', label: 'Contains', hint: 'True if the field includes any keyword — leave blank to always be true' },
+  { value: 'EXACT', label: 'Exact match', hint: 'True only if the field is exactly one keyword — leave blank to always be true' },
   { value: 'REGEX', label: 'Regex', hint: 'First keyword is used as a regular expression' },
 ];
 
@@ -146,14 +146,18 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
   }
   for (const node of nodes) {
     if (node.type === 'CONDITION') {
+      // Only REGEX needs a keyword (the pattern) — CONTAINS/EXACT with no
+      // keyword is a deliberate always-true condition, not an error.
       if (node.conditionMatchType === 'REGEX') {
+        const pattern = node.conditionKeywords.split(',')[0]?.trim();
+        if (!pattern) {
+          return 'Regex conditions need a pattern.';
+        }
         try {
-          new RegExp(node.conditionKeywords.split(',')[0]?.trim() ?? '');
+          new RegExp(pattern);
         } catch {
           return 'One of your conditions has an invalid regular expression.';
         }
-      } else if (node.conditionKeywords.trim() === '') {
-        return 'Every condition needs at least one keyword.';
       }
       const thenError = validateActionSteps(node.then, depth + 1);
       if (thenError) return thenError;

@@ -8,8 +8,10 @@ export class TriggerDto {
   @IsEnum(TriggerMatchType)
   matchType!: TriggerMatchType;
 
-  // Required for EXACT/CONTAINS (one or more keywords, any-match) and REGEX
-  // (first entry is the pattern). Ignored for AI_INTENT.
+  // EXACT/CONTAINS: any-match against these keywords, or — if left empty —
+  // matches unconditionally (every comment on the post). REGEX: first entry
+  // is the pattern, required (rejected at write time if missing/invalid, no
+  // "match anything" fallback makes sense there). Ignored for AI_INTENT.
   @IsArray()
   @IsString({ each: true })
   keywords!: string[];
