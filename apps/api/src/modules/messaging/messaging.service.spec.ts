@@ -228,7 +228,13 @@ describe('MessagingService.send', () => {
     );
   });
 
-  it('records the failure, trips the breaker, and rethrows on a Graph API error', async () => {
+  it('records the failure, trips the breaker, and does NOT rethrow (no auto-retry) on a non-429 Graph API error', async () => {
+    // Regression test for a real production incident (2026-09-24): a
+    // REPLY_COMMENT posted 5 real times because BullMQ auto-retried on
+    // every Graph API error, including ambiguous 5xx responses where
+    // Meta's write may have already completed. Any confirmed HTTP response
+    // from Meta other than 429 must not be auto-retried for a
+    // non-idempotent send — see the comment in MessagingService.send.
     const { service, prisma, circuitBreaker } = makeService();
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
@@ -246,12 +252,59 @@ describe('MessagingService.send', () => {
           content: { text: 'hi' },
         }),
       ),
-    ).rejects.toThrow('Invalid parameter');
+    ).resolves.toBeUndefined();
 
     expect(circuitBreaker.recordFailure).toHaveBeenCalledWith('account-1');
     expect(prisma.messageLog.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.FAILED, errorCode: 'Invalid parameter' }) }),
     );
+  });
+
+  it('does NOT rethrow on an ambiguous 500 Graph API error either (the exact production incident)', async () => {
+    const { service, prisma } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { message: 'An unknown error has occurred.', type: 'OAuthException', code: 1 } }),
+    }) as any;
+
+    await expect(
+      service.send(
+        makeJob({
+          workspaceId: 'workspace-1',
+          instagramAccountId: 'account-1',
+          recipientId: 'comment-123',
+          recipientType: 'comment',
+          actionType: ActionType.REPLY_COMMENT,
+          content: { text: 'thanks!' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: MessageLogStatus.FAILED, errorCode: 'An unknown error has occurred.' }),
+      }),
+    );
+  });
+
+  it('DOES rethrow (auto-retry) on a genuine network-level failure with no Graph API response at all', async () => {
+    const { service, circuitBreaker } = makeService();
+    global.fetch = jest.fn().mockRejectedValue(new Error('fetch failed: ECONNRESET')) as any;
+
+    await expect(
+      service.send(
+        makeJob({
+          workspaceId: 'workspace-1',
+          instagramAccountId: 'account-1',
+          recipientId: 'comment-123',
+          actionType: ActionType.SEND_DM,
+          content: { text: 'hi' },
+        }),
+      ),
+    ).rejects.toThrow('ECONNRESET');
+
+    expect(circuitBreaker.recordFailure).toHaveBeenCalledWith('account-1');
   });
 
   it('classifies a 429 Graph API response as RATE_LIMITED in the MessageLog', async () => {

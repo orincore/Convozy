@@ -480,6 +480,33 @@ scoping new phases/features rather than re-researching ManyChat from scratch.
   numbering), `message-send.processor.spec.ts` (6 — job-name routing, DLQ
   requeue round cap, inactive-account skip, never-requeue-the-scan-job-itself).
 
+### Real production incident (2026-09-24): a comment reply posted 5 times
+
+User report: "comment reply was posted 5 times." Live VPS log check found the
+root cause fast — `MessagingService.send` re-threw on **every** Graph API
+error, so BullMQ's default retry policy (5 attempts, exponential backoff)
+retried a `REPLY_COMMENT` job 5 times. Each attempt got back `500
+{"error":{"message":"An unknown error has occurred.","type":"OAuthException",
+"code":1}}` from Meta — an ambiguous error, not a clean rejection — and per
+the user, Meta's write actually succeeded on some/all of those 5 attempts
+despite returning an error each time. DM sends were unaffected (confirmed by
+the user) — same code path, just didn't hit this specific Meta flake during
+the incident window.
+
+**Fix**: `MessagingService.send` now only lets BullMQ auto-retry on an
+explicit `429` (rate limited — Meta didn't process it) or a genuine
+network-level failure (no `GraphApiError`, meaning no response ever reached
+us). Any other confirmed Graph API response (4xx or 5xx) is recorded as
+`FAILED` in `MessageLog` and returns without rethrowing — visible for manual
+follow-up, never silently lost, but never blindly re-sent either. This
+directly trades "never lose a failed send" (the original Phase 3 design
+intent) for "never duplicate an irreversible send" where the two conflict —
+the right call per CLAUDE.md §1's own stated priority ("correctness and
+idempotency matter more than raw speed"). 3 new/updated tests in
+`messaging.service.spec.ts` (non-429 Graph error doesn't rethrow, the exact
+ambiguous-500 scenario doesn't rethrow, a genuine network failure still
+does). 111/111 tests, clean tsc/lint.
+
 ## Phase 4 — Dashboard (creator-facing app)
 
 - ✅ Auth (signup/login, JWT sessions) — built in Phase 0.5/0.6: email/password
@@ -693,7 +720,28 @@ gap this surfaced that isn't in the 10-milestone list yet, see `ui.md` §4).
   `web.Dockerfile` aren't tracked and were confirmed untouched). This sync
   also surfaced and fixed the fact that Phase 5.1's entire billing module had
   never actually reached the VPS despite being "done" locally for hours —
-  see Phase 5.1's note above. New durable deploy pattern recorded in memory.
+  see Phase 5.1's note above. New durable deploy pattern recorded in memory:
+  local commit+push → VPS `git fetch origin` + `git merge origin/main --ff-only`
+  (checked `git status`/`git diff --stat` clean first) → rebuild the
+  affected containers → `up -d` → verify `/health` + logs.
+
+**Follow-up fix, same day (user directive, 2026-09-24): "match anything"
+when no keyword is set.** Previously a CONTAINS/EXACT trigger or condition
+with an empty `keywords` array silently matched *nothing* (`[].some(...)`
+is always false) — now it matches *every* comment/condition-check
+unconditionally, since there's nothing to check against. REGEX is
+unchanged (still requires a pattern, rejected at write time if missing —
+no sensible "match anything" regex to assume). Implemented in the shared
+`AutomationsService.matchesKeywords` (used by both triggers and M1's
+conditions), DTO comments updated, frontend validation relaxed to only
+require a keyword for REGEX (`automations/new/page.tsx`,
+`action-step-editor.tsx`'s `validateActionSteps`), hint text updated to
+say "leave blank to match every comment." 6 new backend tests (empty
+CONTAINS/EXACT triggers match anything, empty REGEX trigger still never
+matches, empty CONTAINS condition always routes THEN). 109/109 tests,
+clean tsc/lint both apps, verified live via a direct API create call.
+Committed (`3b07669`), pulled + rebuilt + restarted on the VPS, health
+checks clean.
 
 **Milestones 2–10 (segmentation/tags, templates, comments growth tool,
 require-follow-gate, sequences, broadcasts, external-request step,

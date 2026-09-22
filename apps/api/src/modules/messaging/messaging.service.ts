@@ -88,6 +88,26 @@ export class MessagingService {
         graphError?.body ?? null,
         graphError?.message ?? (err as Error).message,
       );
+
+      // GraphApiError means Meta's server actually received and responded
+      // to this request — for a non-idempotent, customer-facing send
+      // (REPLY_COMMENT/SEND_DM each create a new reply/message every call,
+      // there's no dedup on Meta's side), retrying on anything but an
+      // explicit 429 risks posting a duplicate if Meta's write actually
+      // completed despite the error response. Confirmed happening in
+      // production 2026-09-24: a REPLY_COMMENT posted 5 real times after
+      // Meta returned "500 {code:1, message: 'An unknown error has
+      // occurred'}" on every one of 5 automatic BullMQ retries — Meta's
+      // own error was ambiguous, not a clean rejection. Only 429
+      // (explicitly "not processed, rate limited") and true network-level
+      // failures (err is not a GraphApiError — fetch() itself never got a
+      // response, so nothing could have reached Meta) are safe to let
+      // BullMQ retry; every other Graph API response stops here instead —
+      // recorded as FAILED (visible in Activity for manual follow-up), not
+      // silently lost, but never blindly re-sent.
+      if (graphError && graphError.status !== 429) {
+        return;
+      }
       throw err; // BullMQ retries with backoff; DLQ requeue scan picks it up after that's exhausted
     }
   }
