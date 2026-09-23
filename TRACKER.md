@@ -765,11 +765,83 @@ clean tsc/lint both apps, verified live via a direct API create call.
 Committed (`3b07669`), pulled + rebuilt + restarted on the VPS, health
 checks clean.
 
-**Milestones 2–10 (segmentation/tags, templates, comments growth tool,
-require-follow-gate, sequences, broadcasts, external-request step,
-analytics; Follow-to-DM dropped — no Meta webhook/endpoint exists for it,
-verified live against current docs)**: not started, full detail in the plan
-file. Building **one at a time**, next up is Milestone 2 once the user
+**Real production incident, same day (2026-09-24): a REPLY_COMMENT
+automation replied to itself in an infinite loop.** An automation with an
+empty-keyword ("match anything") trigger publicly replied to a comment;
+Meta's `comments`/`live_comments` webhook legitimately re-delivered that
+reply as a fresh comment event authored by the connected account itself;
+nothing distinguished that from a real viewer, so it matched its own
+trigger and replied to itself again — a new public reply every ~3-4
+seconds. Caught live from VPS logs within minutes of the report (different
+`externalEventId` every cycle, not a retry of one job — ruled out the
+`MessagingService` retry fix from earlier the same day). Fixed with a
+structural guard, `InstagramService.isOwnAccountComment(instagramAccountId,
+{id, username})`, checked in `WebhooksController.receive()` for every
+comment/messaging event before mapping or enqueueing — a self-authored
+event never reaches automation matching/dispatch at all, so no trigger
+configuration (however broad) can cause this again. 9 new tests (5 on
+`isOwnAccountComment` itself, 4 on the controller's guard, including the
+exact incident payload shape). 147/147 tests, clean tsc/lint. Deployed
+immediately (`978c7b3`) — verified live afterward: no further loop activity
+in worker logs post-deploy. Documented here as a standing architectural
+lesson: **any feature that can cause the connected account to post publicly
+needs this same self-authorship check considered explicitly**, not just
+comments — e.g. Milestone 4's Comments Growth Tool (`HIDE_COMMENT`,
+`REPLY_COMMENT`) inherits this guard for free since it reuses the same
+webhook pipeline, but a new source of automated public posts added outside
+that pipeline would not.
+
+**Milestone 2 — Contacts, Tags, Custom Fields, Segments: ✅ done, deployed, verified live (2026-09-24).**
+- Schema (additive migration `20260925010000_contacts_tags_segments`):
+  `Contact`/`Tag`/`ContactTag`/`CustomField`/`ContactFieldValue`/`Segment`
+  models, `CustomFieldType` enum, `CommentEvent.fromIgScopedId` column
+  (previously dropped entirely for comment-sourced events — `change.value.from.id`
+  exists in Meta's payload and was just never captured).
+  Ships **free, no entitlement gate** — matches the audit's own
+  recommendation (unlike Milestone 1's live-comment gate, which existed
+  specifically to prove the gating pattern works).
+- Backend: new `contacts` module. `ContactsService.recordInbound` is called
+  from `WebhookEventsProcessor` for every inbound event (matched or not,
+  non-fatal — never blocks the core pipeline). Full CRUD for tags/custom
+  fields (typed value validation: NUMBER/BOOLEAN/DATE/TEXT) and segments (a
+  recursive `all`/`any`/`tag`/`field` rule tree, evaluated at read time via
+  `SegmentsService`-equivalent `buildSegmentWhere` — never materialized, so
+  segment membership is never stale). Segment field comparisons scoped to
+  `eq`/`neq`/`contains` — `gt`/`lt` deliberately deferred and documented in
+  the DTO, since `ContactFieldValue.value` is stored as text and a correct
+  numeric comparison needs a typed column or raw SQL, real scope beyond this
+  milestone. 25 service tests + updated webhook-pipeline tests.
+- Frontend: dashboard nav restructured from a 3-item pill row into a
+  grouped left sidebar (`Accounts` standalone; `Automate` → Automations;
+  `Audience` → Contacts/Segments/Tags/Custom fields; `Insights` → Activity)
+  — the 3-item nav genuinely overflowed once this milestone's 4 new
+  destinations landed, per `ui.md`'s own prediction. New pages: `/app/tags`,
+  `/app/custom-fields`, `/app/contacts` (+ `/app/contacts/[id]` detail, tag
+  add/remove, custom-field value editing), `/app/segments` (+ live member
+  counts) and `/app/segments/new`. The segment rule builder is a
+  **deliberately-scoped flat ALL/ANY list** of tag/field conditions, not a
+  full nested-group tree editor — the backend already supports arbitrary
+  nesting (tested), so this is a documented UI scope decision (CLAUDE.md
+  §14), not a backend limitation; nested-group UI can be added to this same
+  page later with zero backend changes.
+- Verified end-to-end twice: once via direct API calls (create tag/field/
+  segment, tag a manually-inserted contact, confirm segment membership and
+  field value round-trip through real Postgres) and once through the actual
+  browser UI (Playwright, headless — every new page loads with zero console
+  errors, the segment-creation form round-trips through the real API and
+  lands back on the segments list showing the real live member count).
+- 147/147 backend tests, clean `tsc`/lint on both apps, clean frontend
+  production build (all 6 new routes registered). Deployed via the new
+  one-command `infra/scripts/deploy.sh` (`git fetch` + `--ff-only` merge +
+  build + migrate + restart + health check) — see that script's own header
+  for the mechanics. Live health check clean post-deploy.
+
+**Milestones 3–10 (templates, comments growth tool, require-follow-gate,
+sequences, broadcasts, external-request step, analytics; Follow-to-DM
+dropped — no Meta webhook/endpoint exists for it, verified live against
+current docs)**: not started, full detail in the plan file. Building **one
+at a time**, next up is Milestone 3 (pre-built automation templates — the
+`AutomationTemplate` model already exists in schema, unused) once the user
 confirms readiness to continue.
 
 ## Phase 6 — AI features
