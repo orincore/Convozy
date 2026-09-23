@@ -43,4 +43,14 @@ export interface MetaMessagingEvent {
     // webhook docs didn't spell this out directly.
     reply_to?: { story?: { id: string; url: string } };
   };
+  // Present when the sender tapped a postback-type button on a Button
+  // Template message (see messaging.service.ts's sendButtonTemplate) —
+  // requires the app be subscribed to the messaging_postbacks webhook field
+  // (see InstagramService.WEBHOOK_SUBSCRIBED_FIELDS). Confirmed shape
+  // against Meta's current Instagram-Login webhook examples doc.
+  postback?: {
+    mid: string;
+    title: string;
+    payload: string;
+  };
 }

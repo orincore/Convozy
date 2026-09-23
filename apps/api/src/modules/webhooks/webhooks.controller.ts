@@ -96,6 +96,17 @@ export class WebhooksController {
           this.logger.debug(`Dropping self-authored message ${messagingEvent.message?.mid} on account ${instagramAccountId}`);
           continue;
         }
+
+        if (messagingEvent.postback) {
+          await this.webhooksService.enqueuePostbackIfNew({
+            instagramAccountId,
+            senderId: messagingEvent.sender.id,
+            payload: messagingEvent.postback.payload,
+            mid: messagingEvent.postback.mid,
+          });
+          continue;
+        }
+
         const jobData = this.mapMessagingEventToJobData(messagingEvent, instagramAccountId);
         if (jobData) {
           await this.webhooksService.enqueueIfNew(jobData);

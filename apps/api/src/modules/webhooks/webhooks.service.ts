@@ -8,6 +8,7 @@ import { AppConfig } from '../../config/configuration';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { QueueName } from '../../queues/constants';
 import { WebhookEventJobData } from '../../queues/processors/webhook-events.processor';
+import { PostbackEventJobData } from '../../queues/processors/postback-events.processor';
 
 const DEDUP_TTL_SECONDS = 24 * 60 * 60; // Meta may redeliver well within a day
 
@@ -19,6 +20,7 @@ export class WebhooksService {
     private readonly configService: ConfigService<AppConfig, true>,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @InjectQueue(QueueName.WEBHOOK_EVENTS) private readonly webhookQueue: Queue<WebhookEventJobData>,
+    @InjectQueue(QueueName.POSTBACK_EVENTS) private readonly postbackQueue: Queue<PostbackEventJobData>,
   ) {}
 
   /** Meta's GET verification handshake when subscribing the webhook URL. */
@@ -86,6 +88,25 @@ export class WebhooksService {
       // enqueue itself fails, Meta's retry of the same event would see
       // "already seen" and never actually queue it. Clear it so a retry
       // (or the same request failing transiently) gets a real second try.
+      await this.redis.del(dedupKey);
+      throw err;
+    }
+    return true;
+  }
+
+  /** Same dedup+enqueue shape as enqueueIfNew, keyed off the postback's own message id instead of a CommentEvent's externalEventId. */
+  async enqueuePostbackIfNew(event: PostbackEventJobData): Promise<boolean> {
+    const dedupKey = `webhook:dedup:postback:${event.mid}`;
+    const isNew = await this.redis.set(dedupKey, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
+
+    if (!isNew) {
+      this.logger.debug(`Duplicate postback event ignored: ${event.mid}`);
+      return false;
+    }
+
+    try {
+      await this.postbackQueue.add('process-postback', event, { jobId: `postback-webhook-${event.mid}` });
+    } catch (err) {
       await this.redis.del(dedupKey);
       throw err;
     }

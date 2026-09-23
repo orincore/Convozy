@@ -15,6 +15,7 @@ import { AutomationMatchProcessor } from './queues/processors/automation-match.p
 import { MessageSendProcessor } from './queues/processors/message-send.processor';
 import { AiProcessingProcessor } from './queues/processors/ai-processing.processor';
 import { TokenRefreshProcessor } from './queues/processors/token-refresh.processor';
+import { PostbackEventsProcessor } from './queues/processors/postback-events.processor';
 
 /**
  * Root module for the worker entrypoint (worker.ts). Shares PrismaModule /
@@ -45,6 +46,7 @@ import { TokenRefreshProcessor } from './queues/processors/token-refresh.process
     MessageSendProcessor,
     AiProcessingProcessor,
     TokenRefreshProcessor,
+    PostbackEventsProcessor,
   ],
 })
 export class WorkerModule {}

@@ -599,4 +599,84 @@ describe('InstagramService', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
   });
+
+  describe('checkIsFollowing', () => {
+    it('returns true when Meta reports is_user_follow_business: true', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ is_user_follow_business: true }) }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+      const result = await service.checkIsFollowing('acc-1', 'igsid-1');
+
+      expect(result).toBe(true);
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('https://graph.instagram.com/v21.0/igsid-1?fields=is_user_follow_business'),
+      );
+    });
+
+    it('returns false when Meta reports is_user_follow_business: false', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ is_user_follow_business: false }) }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.checkIsFollowing('acc-1', 'igsid-1')).toBe(false);
+    });
+
+    it('fails closed to false on a Graph API error response (e.g. consent required)', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'User consent is required' }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.checkIsFollowing('acc-1', 'igsid-1')).toBe(false);
+    });
+
+    it('fails closed to false on a network-level failure instead of throwing', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockRejectedValue(new Error('fetch failed')) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      await expect(service.checkIsFollowing('acc-1', 'igsid-1')).resolves.toBe(false);
+    });
+
+    it('fails closed to false when the account has no usable credentials', async () => {
+      const prisma = { instagramAccount: { findUnique: jest.fn().mockResolvedValue(null) } } as any;
+      global.fetch = jest.fn() as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.checkIsFollowing('missing-acc', 'igsid-1')).toBe(false);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -39,8 +39,9 @@ function makeService(metaOverrides: Record<string, unknown> = {}) {
 
   const redis = { set: jest.fn().mockResolvedValue('OK'), del: jest.fn() } as any;
   const queue = { add: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new WebhooksService(configService, redis, queue);
-  return { service, redis, queue };
+  const postbackQueue = { add: jest.fn().mockResolvedValue(undefined) } as any;
+  const service = new WebhooksService(configService, redis, queue, postbackQueue);
+  return { service, redis, queue, postbackQueue };
 }
 
 function makeEvent(overrides: Record<string, unknown> = {}) {
@@ -147,5 +148,27 @@ describe('WebhooksService.enqueueIfNew', () => {
     await expect(service.enqueueIfNew(makeEvent())).rejects.toThrow('Custom Id cannot be integers');
 
     expect(redis.del).toHaveBeenCalledWith(expect.stringContaining('18095218910439494'));
+  });
+});
+
+describe('WebhooksService.enqueuePostbackIfNew', () => {
+  const postbackEvent = { instagramAccountId: 'account-1', senderId: 'user-1', payload: 'action-1:0', mid: 'mid-1' };
+
+  it('enqueues onto the postback queue, keyed off the postback mid', async () => {
+    const { service, postbackQueue } = makeService();
+
+    await service.enqueuePostbackIfNew(postbackEvent);
+
+    expect(postbackQueue.add).toHaveBeenCalledWith('process-postback', postbackEvent, { jobId: 'postback-webhook-mid-1' });
+  });
+
+  it('returns false and never enqueues a duplicate postback delivery', async () => {
+    const { service, redis, postbackQueue } = makeService();
+    redis.set.mockResolvedValue(null);
+
+    const result = await service.enqueuePostbackIfNew(postbackEvent);
+
+    expect(result).toBe(false);
+    expect(postbackQueue.add).not.toHaveBeenCalled();
   });
 });

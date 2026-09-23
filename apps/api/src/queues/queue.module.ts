@@ -43,6 +43,7 @@ import { QueueName } from './constants';
       { name: QueueName.AI_PROCESSING },
       { name: QueueName.BILLING_EVENTS },
       { name: QueueName.TOKEN_REFRESH },
+      { name: QueueName.POSTBACK_EVENTS },
     ),
   ],
   exports: [BullModule],

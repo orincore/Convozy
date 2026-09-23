@@ -23,7 +23,10 @@ const TOKEN_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 // comments made during a live video and needs the same permissions already
 // granted for "comments" (instagram_business_basic +
 // instagram_business_manage_comments) — no extra OAuth scope required.
-const WEBHOOK_SUBSCRIBED_FIELDS = 'comments,live_comments,messages';
+// "messaging_postbacks" notifies when a person taps a postback-type button
+// on a Button Template message (messaging-api/button-template) — needed for
+// the interactive-DM-button feature, same permissions already granted.
+const WEBHOOK_SUBSCRIBED_FIELDS = 'comments,live_comments,messages,messaging_postbacks';
 
 // Business Login for Instagram (docs: developers.facebook.com/documentation/
 // instagram-platform/instagram-api-with-instagram-login/business-login).
@@ -550,6 +553,51 @@ export class InstagramService {
         profileSyncedAt: true,
       },
     });
+  }
+
+  /**
+   * Checks whether the Instagram user identified by `igScopedId` follows
+   * this connected account — used to gate a postback button's response
+   * (AutomationsService.resolvePostback). Confirmed against the Instagram
+   * User Profile API doc specific to Instagram API with Instagram Login
+   * (graph.instagram.com, Instagram User access token, permissions already
+   * granted: instagram_business_basic + instagram_business_manage_messages
+   * — this is the Instagram-Login-specific page, not the Facebook-Login one
+   * that needs a Page access token + pages_manage_metadata, which this app
+   * doesn't use).
+   *
+   * Meta requires "user consent" to read this — set only once the user has
+   * messaged the business or tapped an icebreaker/button. A postback tap
+   * always satisfies that (they're replying inside a DM thread the business
+   * already opened), but any failure here — consent, network, rate limit —
+   * fails closed to NOT_FOLLOWING rather than silently unlocking gated
+   * content.
+   */
+  async checkIsFollowing(instagramAccountId: string, igScopedId: string): Promise<boolean> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return false;
+    }
+
+    const version = this.configService.get('meta', { infer: true }).graphApiVersion;
+    const params = new URLSearchParams({
+      fields: 'is_user_follow_business',
+      access_token: credentials.accessToken,
+    });
+
+    try {
+      const res = await fetch(`https://graph.instagram.com/${version}/${igScopedId}?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Follow-status check failed for ${igScopedId} on account ${instagramAccountId}: ${res.status} ${body}`);
+        return false;
+      }
+      const json = (await res.json()) as { is_user_follow_business?: boolean };
+      return json.is_user_follow_business === true;
+    } catch (err) {
+      this.logger.warn(`Follow-status check threw for ${igScopedId} on account ${instagramAccountId}: ${(err as Error).message}`);
+      return false;
+    }
   }
 
   private requireInstagramAppId(): string {

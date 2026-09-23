@@ -26,6 +26,7 @@ import { FEATURE_KEYS } from '../billing/entitlements.constants';
 import { QueueName } from '../../queues/constants';
 import { MessageSendJobData } from '../../queues/processors/message-send.processor';
 import { AiProcessingJobData } from '../../queues/processors/ai-processing.processor';
+import { PostbackEventJobData } from '../../queues/processors/postback-events.processor';
 import { CreateAutomationDto } from './dto/create-automation.dto';
 import { UpdateAutomationDto } from './dto/update-automation.dto';
 import { ActionDto, ActionPayloadDto } from './dto/action.dto';
@@ -244,6 +245,23 @@ export class AutomationsService {
           condition: dto.condition ? { create: this.toConditionCreateInput(dto.condition) } : undefined,
         },
       });
+
+      // A POSTBACK button's `payload` (the string Meta round-trips in the
+      // messaging_postbacks webhook — see resolvePostback below) is never
+      // trusted from the client: it must resolve back to exactly this row,
+      // so it can only be assigned once the row exists. A second write,
+      // still inside the caller's transaction — not worth restructuring the
+      // single-create path above just to avoid it.
+      if (dto.payload?.buttons?.some((b) => b.type === 'POSTBACK')) {
+        const buttons = dto.payload.buttons.map((b, index) =>
+          b.type === 'POSTBACK' ? { ...b, payload: `${action.id}:${index}` } : b,
+        );
+        await tx.action.update({
+          where: { id: action.id },
+          data: { payload: { ...dto.payload, buttons } as unknown as object },
+        });
+      }
+
       if (dto.children) {
         await this.createActionTree(tx, automationId, action.id, ActionBranch.THEN, dto.children.then);
         await this.createActionTree(tx, automationId, action.id, ActionBranch.ELSE, dto.children.else);
@@ -575,5 +593,62 @@ export class AutomationsService {
 
   private renderText(template: string, commentEvent: CommentEvent): string {
     return template.replace(/\{\{\s*username\s*\}\}/g, commentEvent.fromUsername);
+  }
+
+  /**
+   * Resolves a tapped postback button (messaging_postbacks webhook) back to
+   * the SEND_DM action that sent it, decides which of its two customizable
+   * messages applies (checking follow status first if the button requires
+   * it), and enqueues the reply. `payload` is always `${actionId}:${buttonIndex}`
+   * — server-generated at write time (see createActionTree), never trusted
+   * as arbitrary client input, so the instagramAccountId cross-check below
+   * is defense in depth rather than the primary safeguard.
+   */
+  async resolvePostback(data: PostbackEventJobData): Promise<void> {
+    const separatorIndex = data.payload.lastIndexOf(':');
+    const actionId = separatorIndex === -1 ? '' : data.payload.slice(0, separatorIndex);
+    const buttonIndex = Number(data.payload.slice(separatorIndex + 1));
+    if (!actionId || Number.isNaN(buttonIndex)) {
+      this.logger.warn(`Malformed postback payload, ignoring: ${data.payload}`);
+      return;
+    }
+
+    const action = await this.prisma.action.findUnique({
+      where: { id: actionId },
+      include: { automation: { select: { workspaceId: true, instagramAccountId: true } } },
+    });
+    if (!action || action.automation.instagramAccountId !== data.instagramAccountId) {
+      this.logger.warn(`Postback payload ${data.payload} does not resolve to an action on account ${data.instagramAccountId}`);
+      return;
+    }
+
+    const payload = action.payload as unknown as ActionPayloadDto | null;
+    const button = payload?.buttons?.[buttonIndex];
+    if (!button || button.type !== 'POSTBACK') {
+      this.logger.warn(`Postback payload ${data.payload} does not resolve to a POSTBACK button`);
+      return;
+    }
+
+    let text = button.unlockedText ?? '';
+    if (button.requireFollow) {
+      const isFollowing = await this.instagramService.checkIsFollowing(data.instagramAccountId, data.senderId);
+      text = isFollowing ? button.unlockedText ?? '' : button.lockedText ?? '';
+    }
+    if (!text) {
+      return;
+    }
+
+    const jobData: MessageSendJobData = {
+      workspaceId: action.automation.workspaceId,
+      instagramAccountId: data.instagramAccountId,
+      recipientId: data.senderId,
+      recipientType: 'user',
+      actionType: ActionType.SEND_DM,
+      content: { text },
+    };
+    // Stable jobId keyed off the postback's own message id — a safe no-op
+    // in BullMQ if Meta redelivers the same postback (the webhook-controller
+    // dedup below is the primary guard; this is defense in depth).
+    await this.messageSendQueue.add('send', jobData, { jobId: `postback-${data.mid}` });
   }
 }

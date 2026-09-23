@@ -1,12 +1,12 @@
 'use client';
 
-import { ArrowBendDownRight, EyeSlash, Plus, Trash } from '@phosphor-icons/react';
+import { ArrowBendDownRight, EyeSlash, LockSimple, Plus, Trash } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import type { ActionInput, ActionType, AutomationAction, ConditionField, TriggerMatchType } from '@/lib/api';
+import type { ActionButtonKind, ActionInput, ActionType, AutomationAction, ConditionField, TriggerMatchType } from '@/lib/api';
 
 // Mirrors AutomationsService.MAX_ACTION_TREE_DEPTH on the backend (see
 // automations.service.ts) — kept in sync manually since there's no shared
@@ -35,6 +35,19 @@ const CONDITION_MATCH_TYPES: { value: TriggerMatchType; label: string; hint: str
   { value: 'REGEX', label: 'Regex', hint: 'First keyword is used as a regular expression' },
 ];
 
+// A button on a SEND_DM step, edited locally. Mirrors ActionButtonInput —
+// `payload` (the postback identifier) is never set here, it's assigned
+// server-side once the action row exists (see the backend's createActionTree).
+export interface ButtonNode {
+  id: string;
+  title: string;
+  type: ActionButtonKind;
+  url: string;
+  requireFollow: boolean;
+  unlockedText: string;
+  lockedText: string;
+}
+
 // The local editor's tree node — a flat shape covering both message actions
 // and CONDITION actions (same house convention as the existing ActionRow:
 // every field present regardless of type, only the relevant ones read at
@@ -45,6 +58,7 @@ export interface ActionStepNode {
   type: ActionType;
   text: string;
   delaySeconds: string;
+  buttons: ButtonNode[];
   conditionField: ConditionField;
   conditionMatchType: TriggerMatchType;
   conditionKeywords: string;
@@ -59,12 +73,17 @@ function makeId(): string {
     : `step-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 }
 
+export function emptyButton(): ButtonNode {
+  return { id: makeId(), title: '', type: 'WEB_URL', url: '', requireFollow: false, unlockedText: '', lockedText: '' };
+}
+
 export function emptyActionStep(type: ActionType = 'SEND_DM'): ActionStepNode {
   return {
     id: makeId(),
     type,
     text: '',
     delaySeconds: '0',
+    buttons: [],
     conditionField: 'COMMENT_TEXT',
     conditionMatchType: 'CONTAINS',
     conditionKeywords: '',
@@ -142,7 +161,22 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
       type: n.type,
       order: index,
       delaySeconds: Number(n.delaySeconds) || 0,
-      payload: { text: n.text.trim() },
+      payload: {
+        text: n.text.trim(),
+        buttons: n.buttons.length
+          ? n.buttons.map((b) =>
+              b.type === 'POSTBACK'
+                ? {
+                    title: b.title.trim(),
+                    type: b.type,
+                    requireFollow: b.requireFollow,
+                    unlockedText: b.unlockedText.trim(),
+                    lockedText: b.requireFollow ? b.lockedText.trim() : undefined,
+                  }
+                : { title: b.title.trim(), type: b.type, url: b.url.trim() },
+            )
+          : undefined,
+      },
     };
   });
 }
@@ -162,6 +196,7 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         type: 'CONDITION',
         text: '',
         delaySeconds: '0',
+        buttons: [],
         conditionField: action.condition.field ?? 'COMMENT_TEXT',
         conditionMatchType: action.condition.matchType,
         conditionKeywords: action.condition.keywords.join(', '),
@@ -175,6 +210,15 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
       type: action.type,
       text: action.payload?.text ?? '',
       delaySeconds: String(action.delaySeconds ?? 0),
+      buttons: (action.payload?.buttons ?? []).map((b) => ({
+        id: makeId(),
+        title: b.title,
+        type: b.type,
+        url: b.url ?? '',
+        requireFollow: b.requireFollow ?? false,
+        unlockedText: b.unlockedText ?? '',
+        lockedText: b.lockedText ?? '',
+      })),
       conditionField: 'COMMENT_TEXT',
       conditionMatchType: 'CONTAINS',
       conditionKeywords: '',
@@ -215,6 +259,26 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
       if (elseError) return elseError;
     } else if (!NO_PAYLOAD_TYPES.includes(node.type) && node.text.trim() === '') {
       return 'Every action needs a message.';
+    } else if (node.buttons.length > 0) {
+      if (node.buttons.length > 3) {
+        return 'A message can have at most 3 buttons.';
+      }
+      for (const button of node.buttons) {
+        if (!button.title.trim()) {
+          return 'Every button needs a title.';
+        }
+        if (button.type === 'WEB_URL' && !button.url.trim()) {
+          return `"${button.title}" needs a link.`;
+        }
+        if (button.type === 'POSTBACK') {
+          if (!button.unlockedText.trim()) {
+            return `"${button.title}" needs a message to send when tapped.`;
+          }
+          if (button.requireFollow && !button.lockedText.trim()) {
+            return `"${button.title}" requires a follow, so it also needs a message for people who aren't following yet.`;
+          }
+        }
+      }
     }
   }
   return null;
@@ -433,23 +497,158 @@ export function ActionStepEditor({
               triggers; skipped for story replies and DMs.
             </p>
           ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">
+                  Message
+                </Label>
+                <textarea
+                  id={`step-text-${node.id}`}
+                  value={node.text}
+                  onChange={(e) => onUpdate(node.id, { text: e.target.value })}
+                  rows={3}
+                  placeholder="Hey {{username}}, here's the link!"
+                  className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use {'{{username}}'} to insert the sender&apos;s name.
+                  {storyReplyWarning &&
+                    ' For story replies this will show a numeric ID, not a handle — Instagram’s webhook doesn’t include a username for those.'}
+                </p>
+              </div>
+
+              {node.type === 'SEND_DM' && (
+                <ButtonListEditor
+                  node={node}
+                  onUpdate={(patch) => onUpdate(node.id, patch)}
+                />
+              )}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ButtonListEditor({ node, onUpdate }: { node: ActionStepNode; onUpdate: (patch: Partial<ActionStepNode>) => void }) {
+  function updateButton(buttonId: string, patch: Partial<ButtonNode>) {
+    onUpdate({ buttons: node.buttons.map((b) => (b.id === buttonId ? { ...b, ...patch } : b)) });
+  }
+  function removeButton(buttonId: string) {
+    onUpdate({ buttons: node.buttons.filter((b) => b.id !== buttonId) });
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs text-muted-foreground">Buttons (optional, up to 3)</Label>
+        {node.buttons.length < 3 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onUpdate({ buttons: [...node.buttons, emptyButton()] })}
+          >
+            <Plus size={12} />
+            Add button
+          </Button>
+        )}
+      </div>
+
+      {node.buttons.map((button) => (
+        <div key={button.id} className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-border bg-background p-3">
+          <div className="flex items-start gap-3">
+            <div className="grid flex-1 grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor={`btn-title-${button.id}`} className="text-xs text-muted-foreground">
+                  Button label
+                </Label>
+                <Input
+                  id={`btn-title-${button.id}`}
+                  value={button.title}
+                  onChange={(e) => updateButton(button.id, { title: e.target.value })}
+                  placeholder="Get the link"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor={`btn-type-${button.id}`} className="text-xs text-muted-foreground">
+                  Type
+                </Label>
+                <Select
+                  id={`btn-type-${button.id}`}
+                  value={button.type}
+                  onChange={(e) => updateButton(button.id, { type: e.target.value as ActionButtonKind })}
+                >
+                  <option value="WEB_URL">Open a link</option>
+                  <option value="POSTBACK">Send a reply when tapped</option>
+                </Select>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => removeButton(button.id)}
+              className="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
+              aria-label={`Remove button ${button.title || ''}`}
+            >
+              <Trash size={14} />
+            </button>
+          </div>
+
+          {button.type === 'WEB_URL' ? (
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">
-                Message
+              <Label htmlFor={`btn-url-${button.id}`} className="text-xs text-muted-foreground">
+                Link
               </Label>
-              <textarea
-                id={`step-text-${node.id}`}
-                value={node.text}
-                onChange={(e) => onUpdate(node.id, { text: e.target.value })}
-                rows={3}
-                placeholder="Hey {{username}}, here's the link!"
-                className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+              <Input
+                id={`btn-url-${button.id}`}
+                value={button.url}
+                onChange={(e) => updateButton(button.id, { url: e.target.value })}
+                placeholder="https://example.com"
               />
-              <p className="text-xs text-muted-foreground">
-                Use {'{{username}}'} to insert the sender&apos;s name.
-                {storyReplyWarning &&
-                  ' For story replies this will show a numeric ID, not a handle — Instagram’s webhook doesn’t include a username for those.'}
-              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
+                <input
+                  type="checkbox"
+                  checked={button.requireFollow}
+                  onChange={(e) => updateButton(button.id, { requireFollow: e.target.checked })}
+                  className="accent-accent"
+                />
+                <LockSimple size={13} />
+                Require a follow before unlocking
+              </label>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor={`btn-unlocked-${button.id}`} className="text-xs text-muted-foreground">
+                  {button.requireFollow ? 'Message when they already follow' : 'Message sent when tapped'}
+                </Label>
+                <textarea
+                  id={`btn-unlocked-${button.id}`}
+                  value={button.unlockedText}
+                  onChange={(e) => updateButton(button.id, { unlockedText: e.target.value })}
+                  rows={2}
+                  placeholder="Here's your link: ..."
+                  className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                />
+              </div>
+
+              {button.requireFollow && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor={`btn-locked-${button.id}`} className="text-xs text-muted-foreground">
+                    Message when they don&apos;t follow yet
+                  </Label>
+                  <textarea
+                    id={`btn-locked-${button.id}`}
+                    value={button.lockedText}
+                    onChange={(e) => updateButton(button.id, { lockedText: e.target.value })}
+                    rows={2}
+                    placeholder="Follow me first, then tap the button again!"
+                    className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

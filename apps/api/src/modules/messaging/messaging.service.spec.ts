@@ -210,7 +210,7 @@ describe('MessagingService.send', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('appends buttons as plain text links instead of guessing at an unverified template shape', async () => {
+  it('sends a real Button Template message for a WEB_URL button, not a flattened plain-text fallback', async () => {
     const { service } = makeService();
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
 
@@ -218,15 +218,50 @@ describe('MessagingService.send', () => {
       makeJob({
         workspaceId: 'workspace-1',
         instagramAccountId: 'account-1',
-        recipientId: 'comment-123',
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
         actionType: ActionType.SEND_DM,
-        content: { text: 'here', buttons: [{ title: 'Shop', url: 'https://example.com' }] },
+        content: { text: 'here', buttons: [{ title: 'Shop', type: 'WEB_URL', url: 'https://example.com' }] },
       }),
     );
 
     const call = (global.fetch as jest.Mock).mock.calls[0];
     const body = JSON.parse(call[1].body);
-    expect(body.message.text).toBe('here\n\nShop: https://example.com');
+    expect(body.message).toEqual({
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: 'here',
+          buttons: [{ type: 'web_url', title: 'Shop', url: 'https://example.com' }],
+        },
+      },
+    });
+  });
+
+  it('sends a POSTBACK button with its stored payload string in the Button Template', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
+        actionType: ActionType.SEND_DM,
+        content: {
+          text: 'pick one',
+          buttons: [{ title: 'Get the link', type: 'POSTBACK', payload: 'action-1:0' }],
+        },
+      }),
+    );
+
+    const call = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.message.attachment.payload.buttons).toEqual([
+      { type: 'postback', title: 'Get the link', payload: 'action-1:0' },
+    ]);
   });
 
   it('short-circuits without calling fetch when the circuit is open', async () => {

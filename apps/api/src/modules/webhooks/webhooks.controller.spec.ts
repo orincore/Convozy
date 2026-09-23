@@ -45,6 +45,7 @@ function makeController() {
   const webhooksService = {
     verifySignature: jest.fn().mockReturnValue(true),
     enqueueIfNew: jest.fn(),
+    enqueuePostbackIfNew: jest.fn(),
   } as any;
   const instagramService = {
     findAccountIdByIgUserId: jest.fn().mockResolvedValue('account-1'),
@@ -144,6 +145,65 @@ describe('WebhooksController.receive — story replies', () => {
     await controller.receive(makeRequest(payload), 'sha256=whatever');
 
     expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
+  });
+});
+
+describe('WebhooksController.receive — messaging_postbacks', () => {
+  it('routes a postback tap to enqueuePostbackIfNew, not the comment/DM pipeline', async () => {
+    const { controller, webhooksService } = makeController();
+    const payload: MetaWebhookPayload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-business-1',
+          time: 1700000000,
+          messaging: [
+            {
+              sender: { id: 'ig-scoped-user-1' },
+              recipient: { id: 'ig-business-1' },
+              timestamp: 1700000000,
+              postback: { mid: 'mid-1', title: 'Get the link', payload: 'action-1:0' },
+            },
+          ],
+        },
+      ],
+    };
+
+    await controller.receive(makeRequest(payload), 'sha256=whatever');
+
+    expect(webhooksService.enqueuePostbackIfNew).toHaveBeenCalledWith({
+      instagramAccountId: 'account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+    expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
+  });
+
+  it('drops a postback from the connected account itself (self-authored guard applies here too)', async () => {
+    const { controller, webhooksService, instagramService } = makeController();
+    instagramService.isOwnAccountComment.mockResolvedValue(true);
+    const payload: MetaWebhookPayload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-business-1',
+          time: 1700000000,
+          messaging: [
+            {
+              sender: { id: 'ig-scoped-user-1' },
+              recipient: { id: 'ig-business-1' },
+              timestamp: 1700000000,
+              postback: { mid: 'mid-1', title: 'Get the link', payload: 'action-1:0' },
+            },
+          ],
+        },
+      ],
+    };
+
+    await controller.receive(makeRequest(payload), 'sha256=whatever');
+
+    expect(webhooksService.enqueuePostbackIfNew).not.toHaveBeenCalled();
   });
 });
 

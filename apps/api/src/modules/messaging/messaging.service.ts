@@ -9,9 +9,16 @@ import { RateLimiterService } from './rate-limiter.service';
 import { CircuitBreakerService } from './circuit-breaker.service';
 import { MessageSendJobData } from '../../queues/processors/message-send.processor';
 
+interface ActionContentButton {
+  title: string;
+  type: 'WEB_URL' | 'POSTBACK';
+  url?: string;
+  payload?: string;
+}
+
 interface ActionContent {
   text: string;
-  buttons?: { title: string; url: string }[];
+  buttons?: ActionContentButton[];
 }
 
 class GraphApiError extends Error {
@@ -117,29 +124,39 @@ export class MessagingService {
     credentials: { accessToken: string; igBusinessId: string },
   ): Promise<unknown> {
     const version = this.configService.get('meta', { infer: true }).graphApiVersion;
-    const text = this.renderContentText(data.content as unknown as ActionContent);
 
     if (data.actionType === ActionType.SEND_DM) {
+      const content = data.content as unknown as ActionContent;
+      const message = this.buildMessageBody(content);
       if (data.recipientType === 'comment') {
         // Private reply. Meta's own constraints (confirmed via live docs):
         // only one message can be sent to a given commenter, and only
         // within 7 days of the comment — a second attempt after success
         // will just fail on Meta's side, which is expected, not a bug here.
+        // NOTE: Meta's Private Replies docs only show a plain-text message
+        // body; the Button Template docs only show recipient.id (not
+        // comment_id). Sending an attachment/template body here is the
+        // best-verified shape (same message.* structure Meta documents for
+        // every other send), but the specific comment_id + attachment
+        // combination is unverified — watch MessageLog for a Graph API
+        // rejection here after this ships and fall back to a flattened
+        // plain-text send if one shows up.
         return this.postGraphApi(
           `${credentials.igBusinessId}/messages`,
-          { recipient: { comment_id: data.recipientId }, message: { text } },
+          { recipient: { comment_id: data.recipientId }, message },
           credentials.accessToken,
           version,
         );
       }
-      // Conversation-sourced (story reply / DM): replying into an existing
-      // messaging thread uses a plain user ID, not a comment_id — a
-      // different request shape than the private-reply case above (also
-      // confirmed via live docs, not assumed). Meta only allows this within
-      // a 24h window of the user's last message.
+      // Conversation-sourced (story reply / DM / a postback follow-up):
+      // replying into an existing messaging thread uses a plain user ID,
+      // not a comment_id — a different request shape than the private-reply
+      // case above (also confirmed via live docs, not assumed). Meta only
+      // allows this within a 24h window of the user's last message. This is
+      // the fully-verified shape for Button Template messages.
       return this.postGraphApi(
         `${credentials.igBusinessId}/messages`,
-        { recipient: { id: data.recipientId }, message: { text } },
+        { recipient: { id: data.recipientId }, message },
         credentials.accessToken,
         version,
       );
@@ -152,6 +169,7 @@ export class MessagingService {
         // primary check.
         throw new Error('REPLY_COMMENT requires a comment-sourced event, not a conversation-sourced one');
       }
+      const text = (data.content as unknown as ActionContent).text;
       return this.postGraphApi(`${data.recipientId}/replies`, { message: text }, credentials.accessToken, version);
     }
 
@@ -170,15 +188,32 @@ export class MessagingService {
     throw new Error(`MessagingService cannot send actionType ${data.actionType}`);
   }
 
-  private renderContentText(content: ActionContent): string {
+  /**
+   * A Button Template message (message.attachment) when there are buttons,
+   * a plain text message otherwise. Shape confirmed against Meta's current
+   * Button Template doc (instagram-api-with-instagram-login/messaging-api/
+   * button-template) — up to 3 buttons, each either `web_url` (opens a
+   * link) or `postback` (fires the messaging_postbacks webhook Convozy
+   * resolves in AutomationsService.resolvePostback).
+   */
+  private buildMessageBody(content: ActionContent): object {
     if (!content.buttons?.length) {
-      return content.text;
+      return { text: content.text };
     }
-    // A generic button/link template's exact request shape for this
-    // endpoint isn't verified against Meta's current docs — appending links
-    // as plain text is a safe, always-correct fallback instead of guessing.
-    const links = content.buttons.map((b) => `${b.title}: ${b.url}`).join('\n');
-    return `${content.text}\n\n${links}`;
+    return {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: content.text,
+          buttons: content.buttons.map((b) =>
+            b.type === 'POSTBACK'
+              ? { type: 'postback', title: b.title, payload: b.payload }
+              : { type: 'web_url', title: b.title, url: b.url },
+          ),
+        },
+      },
+    };
   }
 
   private async postGraphApi(path: string, body: unknown, accessToken: string, version: string): Promise<unknown> {

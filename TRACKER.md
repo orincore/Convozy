@@ -1053,13 +1053,83 @@ since they touch the same page/module.**
   row is preserved as `DISCONNECTED` in Postgres rather than deleted.
 - Not yet deployed to the VPS.
 
-**Milestones 5–10 (require-follow-gate — now also covering ManyChat's
-"Comments Growth Tool" behavior per the rescoping above, sequences,
-broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
-webhook/endpoint exists for it, verified live against current docs)**: not
-started, full detail in the plan file (needs a light update to reflect the
-Milestone 4/6 rescoping). Building **one at a time**, next up is Milestone 6
-(require-follow gating) once the user confirms readiness to continue.
+**Milestone 6 — Interactive DM buttons + require-follow gating: ✅ done,
+verified locally, pending VPS deploy (user directive, 2026-09-23).**
+- **User-reported gap, not a bug**: "buttons" on a SEND_DM were never real
+  interactive buttons — `MessagingService` flattened them to plain text
+  links (`renderContentText`'s own comment said the Button Template shape
+  "isn't verified against Meta's current docs"). The user's actual desired
+  flow (comment → DM with buttons → tap unlocks content, gated behind
+  following the account) needed real Meta button/postback support, which
+  didn't exist. Verified all of the following against Meta's live docs
+  before writing code (multiple prior sessions in this project got Graph
+  API specifics wrong by guessing):
+  - Button Template (`instagram-api-with-instagram-login/messaging-api/
+    button-template`): `message.attachment.type=template`,
+    `payload.template_type=button`, up to 3 buttons, each `web_url` or
+    `postback`. Confirmed for Convozy's actual flow (graph.instagram.com,
+    Instagram User access token) — not the Facebook-Login-specific variant
+    this project deliberately doesn't use.
+  - `messaging_postbacks` webhook field + payload shape
+    (`entry.messaging[].postback.{mid,title,payload}`).
+  - Follow-check: `GET /<IGSID>?fields=is_user_follow_business`, confirmed
+    on the Instagram-Login-specific User Profile API page (graph.instagram.com,
+    same permissions already granted — `instagram_business_basic` +
+    `instagram_business_manage_messages`, no extra scope). Consent is
+    satisfied by the time this fires (a postback tap only happens inside a
+    DM thread the business already opened).
+  - **Scoping decision, asked and confirmed with the user before building**:
+    a purpose-built two-outcome button model (optional require-follow +
+    an "unlocked" message + a "locked" message), not a fully general
+    branching-into-the-button system. Smaller surface, matches the exact
+    described flow, ships in one pass.
+  - **Documented, unresolved uncertainty**: Button Template messages are
+    only fully verified for `recipient.id` (conversation-based) sends.
+    Meta's Private Replies doc (comment-triggered `recipient.comment_id`)
+    only shows a plain-text message body, never an attachment/template
+    example. Sent anyway using the same best-verified `message.*` shape,
+    with a code comment flagging it and instructions to watch MessageLog
+    for a Graph API rejection there specifically — the existing
+    error-handling pipeline already surfaces any such failure visibly
+    (FAILED status + real errorCode in Activity), never silently.
+- Backend: `ActionButtonDto` extended (`type: WEB_URL|POSTBACK`,
+  `requireFollow`, `unlockedText`, `lockedText`; `payload` never trusted
+  from the client). `AutomationsService.createActionTree` does a two-step
+  write for POSTBACK buttons — the payload string
+  (`${actionId}:${buttonIndex}`) can only be assigned once the action row
+  exists, so it can never be forged to resolve to another workspace's
+  action. New `resolvePostback` decodes the payload, loads the Action
+  (cross-checked against the account the postback arrived on), checks
+  follow status only if gated, and enqueues the resolved reply. New
+  `InstagramService.checkIsFollowing` (fails closed to not-following on any
+  error). New `postback-events` queue/processor (webhook response must stay
+  fast — the follow-check is an async Graph call, so it can't happen inline
+  in the webhook handler). `MessagingService` now sends a real Button
+  Template (`buildMessageBody`) instead of flattening to text.
+  `WEBHOOK_SUBSCRIBED_FIELDS` includes `messaging_postbacks`. 15 new
+  backend tests across 4 files.
+- Frontend: SEND_DM steps get a real button editor (title, type, link OR
+  require-follow toggle + two customizable message fields — matches the
+  user's explicit "all messages should be customizable"), up to 3 per
+  message, full client-side validation mirroring the backend DTO.
+- Verified end-to-end against the real local API/DB **and** the real
+  worker process (not just unit tests): created a button through the
+  actual builder UI, confirmed the server-generated postback payload
+  persisted correctly, confirmed it survives an edit-resave (new action id,
+  freshly regenerated payload string), and sent a real HMAC-signed
+  `messaging_postbacks` webhook payload through the live local API —
+  confirmed via worker logs that it was correctly routed to the postback
+  pipeline (not the comment/DM one), decoded, resolved to the right action,
+  and reached the follow-check step (only failing there because the local
+  test fixture's token is a deliberate dummy value, the same expected
+  failure mode already established for the RATE_LIMITED fix's live tests).
+- 182/182 backend tests, clean `tsc`/lint on both apps.
+- Not yet deployed to the VPS.
+
+**Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
+not started, full detail in the plan file (needs a light update to reflect
+the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/
+endpoint exists for it). Building **one at a time**.
 
 ## Phase 6 — AI features
 

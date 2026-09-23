@@ -172,6 +172,8 @@ function makeService(prismaOverrides: Record<string, any> = {}) {
       create: jest.fn((args: any) =>
         Promise.resolve({ id: `action-created-${++actionCreateCounter}`, ...args.data }),
       ),
+      update: jest.fn((args: any) => Promise.resolve({ id: args.where.id, ...args.data })),
+      findUnique: jest.fn(),
     },
     ...prismaOverrides,
   } as any;
@@ -614,6 +616,180 @@ describe('AutomationsService CRUD ownership', () => {
 
     const includeArg = prisma.automation.findUnique.mock.calls[0][0].include;
     expect(includeArg.actions.where).toEqual({ parentActionId: null });
+  });
+
+  it('assigns a POSTBACK button its payload ("${actionId}:${buttonIndex}") only after the action row exists', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue({ id: 'automation-1' });
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await service.create('workspace-1', {
+      name: 'x',
+      instagramAccountId: 'ig-account-1',
+      triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+      actions: [
+        {
+          type: ActionType.SEND_DM,
+          payload: {
+            text: 'pick one',
+            buttons: [
+              { title: 'Get the link', type: 'POSTBACK', requireFollow: false, unlockedText: 'here it is' },
+            ],
+          },
+        },
+      ],
+    } as any);
+
+    // The client never supplies a payload string — create() must not send one.
+    const createCall = prisma.action.create.mock.calls[0][0];
+    expect(createCall.data.payload.buttons[0].payload).toBeUndefined();
+
+    // The follow-up update assigns it, keyed to the id the create() call returned.
+    const updateCall = prisma.action.update.mock.calls[0][0];
+    expect(updateCall.data.payload.buttons[0].payload).toBe('action-created-1:0');
+  });
+});
+
+describe('AutomationsService.resolvePostback', () => {
+  function makeAction(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'action-1',
+      payload: {
+        text: 'pick one',
+        buttons: [
+          {
+            title: 'Get the link',
+            type: 'POSTBACK',
+            payload: 'action-1:0',
+            requireFollow: false,
+            unlockedText: 'Here is your link!',
+          },
+        ],
+      },
+      automation: { workspaceId: 'workspace-1', instagramAccountId: 'ig-account-1' },
+      ...overrides,
+    };
+  }
+
+  it('sends the unlocked message when the button is not gated', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(makeAction());
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
+        actionType: ActionType.SEND_DM,
+        content: { text: 'Here is your link!' },
+      }),
+      expect.objectContaining({ jobId: 'postback-mid-1' }),
+    );
+  });
+
+  it('sends the unlocked message when gated and the tapper is following', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the link',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: true,
+              unlockedText: 'Here is your link!',
+              lockedText: 'Follow me first, then tap again!',
+            },
+          ],
+        },
+      }),
+    );
+    instagramService.checkIsFollowing = jest.fn().mockResolvedValue(true);
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(instagramService.checkIsFollowing).toHaveBeenCalledWith('ig-account-1', 'ig-scoped-user-1');
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: { text: 'Here is your link!' } }),
+      expect.any(Object),
+    );
+  });
+
+  it('sends the locked message (fails closed) when gated and the tapper is not following', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the link',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: true,
+              unlockedText: 'Here is your link!',
+              lockedText: 'Follow me first, then tap again!',
+            },
+          ],
+        },
+      }),
+    );
+    instagramService.checkIsFollowing = jest.fn().mockResolvedValue(false);
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: { text: 'Follow me first, then tap again!' } }),
+      expect.any(Object),
+    );
+  });
+
+  it('does nothing when the action does not belong to the account the postback arrived on', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(makeAction({ automation: { workspaceId: 'w', instagramAccountId: 'a-different-account' } }));
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a malformed payload instead of throwing', async () => {
+    const { service, messageSendQueue } = makeService();
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'not-a-valid-payload',
+      mid: 'mid-1',
+    });
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
   });
 });
 
