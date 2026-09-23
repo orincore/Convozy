@@ -39,6 +39,7 @@ export function InstagramShareButton({ artId, imageUrl }: Props) {
   const [phase, setPhase] = useState<Phase>('preparing');
   const [canShareFile, setCanShareFile] = useState(false);
   const [inApp, setInApp] = useState(false);
+  const [isPhone, setIsPhone] = useState(false);
   const [copied, setCopied] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const fileRef = useRef<File | null>(null);
@@ -52,6 +53,7 @@ export function InstagramShareButton({ artId, imageUrl }: Props) {
     (async () => {
       try {
         setInApp(IN_APP_BROWSER.test(navigator.userAgent));
+        setIsPhone(/iPhone|iPad|Android/i.test(navigator.userAgent));
         const res = await fetch(imageUrl, { cache: 'force-cache' });
         if (!res.ok) throw new Error(`Image request failed (${res.status})`);
         const file = makeFile(await res.blob(), artId);
@@ -138,12 +140,12 @@ export function InstagramShareButton({ artId, imageUrl }: Props) {
               ) : (
                 <>
                   <ShareNetwork size={20} weight="bold" />
-                  Share to Instagram
+                  Share to Instagram Story
                 </>
               )}
             </button>
             <p className="mt-3 text-center text-sm text-muted-foreground">
-              Pick Instagram, then Stories. The link to Convozy is copied for you to paste as a link sticker.
+              Your phone&apos;s share sheet opens. Tap Instagram, then choose Story. The link to Convozy is copied so you can add it as a link sticker.
             </p>
           </motion.div>
         ) : (
@@ -186,6 +188,15 @@ export function InstagramShareButton({ artId, imageUrl }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isPhone && !inApp && (
+        <a
+          href="instagram://story-camera"
+          className="mt-3 block text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Already saved it? Open the Instagram Story camera
+        </a>
+      )}
 
       <div aria-live="polite" className="mt-3 min-h-5 text-center text-sm">
         {phase === 'shared' && (
