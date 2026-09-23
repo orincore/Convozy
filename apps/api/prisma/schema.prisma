@@ -91,6 +91,18 @@ model InstagramAccount {
   // this app uses (see instagram.service.ts). Kept nullable for that reason.
   pageId          String?
 
+  // Cached profile preview fields (name, dashboard-side display only, not
+  // the account's Instagram username). Fetched once at connect time and
+  // refreshed opportunistically during the periodic token-refresh job -
+  // never fetched live on every dashboard page load, so the "Applies to" /
+  // Accounts page never needs to ping Meta just to render. Nullable: absent
+  // for accounts connected before this field existed, until their next
+  // refresh cycle backfills it.
+  displayName        String?
+  profilePictureUrl  String?
+  followersCount     Int?
+  profileSyncedAt    DateTime?
+
   // Encrypted at rest (AES-256-GCM) — see CLAUDE.md §5. Never log this field.
   encryptedAccessToken String
   tokenExpiresAt       DateTime?

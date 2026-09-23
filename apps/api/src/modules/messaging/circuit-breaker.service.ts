@@ -32,11 +32,15 @@ export class CircuitBreakerService {
   }
 
   async recordSuccess(instagramAccountId: string): Promise<void> {
-    const wasOpen = await this.isOpen(instagramAccountId);
     await this.redis.del(this.failureKey(instagramAccountId), this.openKey(instagramAccountId));
-    if (wasOpen) {
-      await this.instagramService.setAccountStatus(instagramAccountId, InstagramAccountStatus.ACTIVE);
-    }
+    // Always resets to ACTIVE, not gated on `isOpen()` first — the open key
+    // has its own 5-minute TTL independent of how long the account actually
+    // stays RATE_LIMITED for, so checking it here raced against real timing
+    // and reliably missed the reset (see getSendCredentials' comment on
+    // InstagramService for the full deadlock this caused). setAccountStatus
+    // is a no-op write when the status already matches, so this is safe and
+    // cheap to call on every successful send.
+    await this.instagramService.setAccountStatus(instagramAccountId, InstagramAccountStatus.ACTIVE);
   }
 
   async recordFailure(instagramAccountId: string): Promise<void> {

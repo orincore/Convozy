@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
 import { AppConfig } from '../../config/configuration';
@@ -70,5 +70,25 @@ export class InstagramController {
       throw new NotFoundAppException('INSTAGRAM_ACCOUNT_NOT_FOUND', 'This Instagram account was not found in your workspace.');
     }
     return this.instagramService.listRecentMedia(id);
+  }
+
+  /**
+   * On-demand refresh of the cached profile preview (name/picture/follower
+   * count) shown on the Accounts page — the only user-triggerable path that
+   * hits the Graph API live; every normal page load reads from the DB.
+   */
+  @Post('accounts/:id/sync-profile')
+  async syncProfile(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    if (!(await this.instagramService.accountBelongsToWorkspace(id, user.workspaceId))) {
+      throw new NotFoundAppException('INSTAGRAM_ACCOUNT_NOT_FOUND', 'This Instagram account was not found in your workspace.');
+    }
+    return this.instagramService.syncProfile(id);
+  }
+
+  /** Unlinks an account (see InstagramService.disconnectAccount for why this marks rather than deletes). */
+  @Delete('accounts/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  disconnect(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.instagramService.disconnectAccount(user.workspaceId, id);
   }
 }

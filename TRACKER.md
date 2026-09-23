@@ -988,6 +988,71 @@ done, verified locally, pending VPS deploy.**
   `HIDE_COMMENT` migration applied cleanly (`20260926010000_hide_comment_action`),
   health check clean, no errors in live api/worker logs post-restart.
 
+**Real production incident, same day (user, 2026-09-23): "@orincore.official
+shows as RATE_LIMITED" — plus two genuinely missing Accounts-page features
+(profile preview/caching, unlink). All three fixed and shipped together
+since they touch the same page/module.**
+- **Root cause, more severe than a display bug**: `CircuitBreakerService
+  .recordFailure` correctly flags an account `RATE_LIMITED` after 5
+  consecutive send failures, but `InstagramService.getSendCredentials`
+  treated `RATE_LIMITED` the same as `DISCONNECTED`/`TOKEN_EXPIRED` and
+  refused to return credentials for it. Since a send can only reach
+  `MessagingService.callGraphApi` (and therefore
+  `CircuitBreakerService.recordSuccess`, the only thing that resets status
+  back to `ACTIVE`) after `getSendCredentials` succeeds, this was a genuine
+  **permanent deadlock**: once RATE_LIMITED, an account could never send
+  again, ever, irrespective of how much time passed or how many later
+  sends would have actually succeeded. Root-caused by reading the full
+  credential-gating chain end to end, not by guessing from the symptom.
+  Fixed two ways: (1) `getSendCredentials` no longer blocks `RATE_LIMITED`
+  — that state is meant to be temporary/self-healing, already correctly
+  gated by `CircuitBreakerService.isOpen()` earlier in the send path; (2)
+  `recordSuccess` no longer gates its `ACTIVE` reset on `isOpen()` still
+  being true (it raced against the open key's own 5-minute TTL and reliably
+  missed), it now always resets — safe because `setAccountStatus` is
+  already a no-op write when the status already matches. 6 new regression
+  tests (`getSendCredentials` per status, `recordSuccess` unconditional
+  reset).
+- **Profile preview + caching** (the "save data to database so no need to
+  ping the API again and again" ask): new nullable `InstagramAccount`
+  columns (`displayName`, `profilePictureUrl`, `followersCount`,
+  `profileSyncedAt`, migration `20260927010000_instagram_profile_preview`).
+  Populated once at connect time (`handleCallback`, extended `/me` fields
+  request — `profile_picture_url`/`followers_count`, confirmed against
+  Meta's current IG User field reference, no extra permission needed) and
+  refreshed opportunistically by the existing periodic token-refresh job
+  (`refreshAccountToken` now also calls the new `syncProfile`, non-fatal on
+  its own failure) — `listAccounts` never calls Meta live, only ever reads
+  the cache. New on-demand `POST /instagram/accounts/:id/sync-profile` +
+  a "Refresh profile" button per row for an immediate manual sync (e.g. for
+  accounts connected before this shipped).
+- **Unlink/disconnect** (previously did not exist at all — not a bug, a
+  gap): new `InstagramService.disconnectAccount` marks the account
+  `DISCONNECTED` + stamps `disconnectedAt` rather than hard-deleting the
+  row — a real delete would cascade-destroy every automation/comment
+  event/message log/contact tied to it (schema `onDelete: Cascade`), which
+  "disconnect" should not silently do. `listAccounts` now excludes
+  `DISCONNECTED` so it actually disappears from the Accounts page;
+  reconnecting the same Instagram account later re-upserts by
+  `igBusinessId` and clears it automatically. New `DELETE
+  /instagram/accounts/:id` (`@HttpCode(204)` from the start — the same
+  missing-204 bug class fixed earlier this session was checked for here
+  proactively, not repeated). Frontend: a disconnect icon button with a
+  native `window.confirm` step (no dialog primitive exists yet in
+  `components/ui/`; not worth building one for a single confirm).
+- Frontend Accounts page rebuilt to render the preview (avatar with a
+  graceful icon fallback when no picture is cached, follower count,
+  human-readable status labels instead of raw enum values like
+  `RATE_LIMITED`) and the two new per-row actions.
+- 171/171 backend tests, clean `tsc`/lint on both apps. Verified end-to-end
+  against the real local API/DB: reproduced the exact stuck state (forced
+  an account to `RATE_LIMITED`), confirmed `sync-profile` now reaches the
+  decrypt step instead of being blocked by status (proven live via the
+  server's own error log, not just unit tests), confirmed the disconnect
+  button's confirm-then-remove flow round-trips correctly and the account
+  row is preserved as `DISCONNECTED` in Postgres rather than deleted.
+- Not yet deployed to the VPS.
+
 **Milestones 5–10 (require-follow-gate — now also covering ManyChat's
 "Comments Growth Tool" behavior per the rescoping above, sequences,
 broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta

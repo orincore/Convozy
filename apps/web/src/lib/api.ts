@@ -94,6 +94,12 @@ export interface ConnectedAccount {
   accountType: string | null;
   status: string;
   connectedAt: string;
+  // Cached profile preview — populated at connect time and refreshed
+  // opportunistically server-side, never fetched live on page load.
+  displayName: string | null;
+  profilePictureUrl: string | null;
+  followersCount: number | null;
+  profileSyncedAt: string | null;
 }
 
 export interface RecentMediaItem {
@@ -109,6 +115,9 @@ export const instagramApi = {
   listAccounts: () => authFetch<ConnectedAccount[]>('/instagram/accounts'),
   startOAuth: () => authFetch<{ url: string }>('/instagram/oauth/start'),
   listMedia: (accountId: string) => authFetch<RecentMediaItem[]>(`/instagram/accounts/${accountId}/media`),
+  syncProfile: (accountId: string) =>
+    authFetch<ConnectedAccount>(`/instagram/accounts/${accountId}/sync-profile`, { method: 'POST' }),
+  disconnect: (accountId: string) => authFetch<void>(`/instagram/accounts/${accountId}`, { method: 'DELETE' }),
 };
 
 // ── Automations ────────────────────────────────────────────────────────────

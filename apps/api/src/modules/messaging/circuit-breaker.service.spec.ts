@@ -98,13 +98,20 @@ describe('CircuitBreakerService', () => {
     expect(instagramService.setAccountStatus).toHaveBeenLastCalledWith('account-1', InstagramAccountStatus.ACTIVE);
   });
 
-  it('recordSuccess on an already-closed breaker does not touch account status', async () => {
+  it('recordSuccess always resets status to ACTIVE, not gated on the circuit still being open', async () => {
+    // Regression test: previously this only called setAccountStatus when
+    // isOpen() was still true, which raced against the open key's own TTL —
+    // once it expired naturally, a subsequent successful send would never
+    // reset a RATE_LIMITED account back to ACTIVE, permanently blocking all
+    // future sends (getSendCredentials refused non-ACTIVE accounts). Now it
+    // always resets; setAccountStatus itself is a safe no-op write when the
+    // status already matches (see InstagramService.setAccountStatus).
     const redis = makeRedis();
     const instagramService = { setAccountStatus: jest.fn() } as any;
     const service = new CircuitBreakerService(redis, instagramService);
 
     await service.recordSuccess('account-1');
 
-    expect(instagramService.setAccountStatus).not.toHaveBeenCalled();
+    expect(instagramService.setAccountStatus).toHaveBeenCalledWith('account-1', InstagramAccountStatus.ACTIVE);
   });
 });

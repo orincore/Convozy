@@ -6,7 +6,7 @@ import { InstagramAccountStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/configuration';
 import { REDIS_CLIENT } from '../../redis/redis.module';
-import { AppException } from '../../common/utils/app-exception';
+import { AppException, NotFoundAppException } from '../../common/utils/app-exception';
 import { encryptSecret, decryptSecret } from '../../common/utils/crypto.util';
 
 const OAUTH_STATE_TTL_SECONDS = 600; // 10 minutes to complete the consent flow
@@ -65,6 +65,12 @@ interface InstagramProfileResponse {
   username: string;
   account_type: string;
   name?: string;
+  // Preview fields (Milestone: Accounts page profile preview + caching).
+  // Confirmed against Meta's current IG User/Business-Login field reference
+  // — both available under the already-granted instagram_business_basic
+  // scope, no extra permission needed.
+  profile_picture_url?: string;
+  followers_count?: number;
 }
 
 export interface ConnectedAccountSummary {
@@ -73,6 +79,10 @@ export interface ConnectedAccountSummary {
   accountType: string | null;
   status: InstagramAccountStatus;
   connectedAt: Date;
+  displayName: string | null;
+  profilePictureUrl: string | null;
+  followersCount: number | null;
+  profileSyncedAt: Date | null;
 }
 
 interface InstagramMediaItem {
@@ -163,10 +173,44 @@ export class InstagramService {
   }
 
   /**
+   * Unlinks an account: marks it DISCONNECTED rather than deleting the row.
+   * A hard delete would cascade-destroy every automation, comment event,
+   * message log, and contact tied to it (schema.prisma onDelete: Cascade) —
+   * real historical data a creator would not expect "disconnect" to erase.
+   * DISCONNECTED accounts are excluded from listAccounts (so they actually
+   * disappear from the Accounts page) and already blocked from sending by
+   * getSendCredentials. Reconnecting the same Instagram account later
+   * re-upserts by igBusinessId and clears this automatically.
+   */
+  async disconnectAccount(workspaceId: string, instagramAccountId: string): Promise<void> {
+    if (!(await this.accountBelongsToWorkspace(instagramAccountId, workspaceId))) {
+      throw new NotFoundAppException(
+        'INSTAGRAM_ACCOUNT_NOT_FOUND',
+        'This Instagram account was not found in your workspace.',
+      );
+    }
+    await this.prisma.instagramAccount.update({
+      where: { id: instagramAccountId },
+      data: { status: InstagramAccountStatus.DISCONNECTED, disconnectedAt: new Date() },
+    });
+  }
+
+  /**
    * Used by the messaging module to get what it needs for an outbound Graph
    * API call without querying InstagramAccount directly (CLAUDE.md §3 rule
-   * 1). Returns null for a missing/disconnected account so callers can fail
-   * cleanly instead of sending with a stale token.
+   * 1). Returns null for a missing/disconnected/expired account so callers
+   * can fail cleanly instead of sending with a stale token.
+   *
+   * RATE_LIMITED is deliberately NOT in this blocklist. It's a temporary,
+   * self-healing state tracked primarily by CircuitBreakerService's Redis
+   * key (isOpen() is what actually gates whether a send is attempted during
+   * the open window — see MessagingService.send). Blocking credentials here
+   * too created a permanent deadlock: once RATE_LIMITED, this always
+   * returned null, so a send could never reach callGraphApi again, so
+   * CircuitBreakerService.recordSuccess (the only thing that resets status
+   * back to ACTIVE) could never run — the account was bricked forever after
+   * 5 consecutive failures. Found live 2026-09-23 (@orincore.official stuck
+   * on RATE_LIMITED with the circuit long since closed).
    */
   async getSendCredentials(
     instagramAccountId: string,
@@ -175,7 +219,15 @@ export class InstagramService {
       where: { id: instagramAccountId },
       select: { encryptedAccessToken: true, igBusinessId: true, status: true },
     });
-    if (!account || account.status !== InstagramAccountStatus.ACTIVE) {
+    if (!account) {
+      return null;
+    }
+    const blockedStatuses: InstagramAccountStatus[] = [
+      InstagramAccountStatus.DISCONNECTED,
+      InstagramAccountStatus.TOKEN_EXPIRED,
+      InstagramAccountStatus.ERROR,
+    ];
+    if (blockedStatuses.includes(account.status)) {
       return null;
     }
     return { accessToken: this.decryptToken(account.encryptedAccessToken), igBusinessId: account.igBusinessId };
@@ -242,9 +294,26 @@ export class InstagramService {
   }
 
   async listAccounts(workspaceId: string): Promise<ConnectedAccountSummary[]> {
+    // Reads only — no Graph API call here. Profile preview fields are
+    // populated at connect time and refreshed by refreshAccountToken's
+    // periodic cycle (see syncProfile below), never fetched live on page
+    // load. DISCONNECTED accounts are excluded — disconnectAccount marks
+    // rather than deletes them (preserves automations/history), so "unlink"
+    // has to be enforced here for the account to actually disappear from
+    // the Accounts page.
     const accounts = await this.prisma.instagramAccount.findMany({
-      where: { workspaceId },
-      select: { id: true, igUsername: true, accountType: true, status: true, connectedAt: true },
+      where: { workspaceId, status: { not: InstagramAccountStatus.DISCONNECTED } },
+      select: {
+        id: true,
+        igUsername: true,
+        accountType: true,
+        status: true,
+        connectedAt: true,
+        displayName: true,
+        profilePictureUrl: true,
+        followersCount: true,
+        profileSyncedAt: true,
+      },
       orderBy: { connectedAt: 'desc' },
     });
     return accounts;
@@ -295,6 +364,7 @@ export class InstagramService {
 
     const expiresAt = new Date(Date.now() + longLived.expires_in * 1000);
 
+    const now = new Date();
     const account = await this.prisma.instagramAccount.upsert({
       where: { igBusinessId: profile.id },
       create: {
@@ -303,6 +373,10 @@ export class InstagramService {
         igUserId: profile.user_id,
         igUsername: profile.username,
         accountType: profile.account_type,
+        displayName: profile.name ?? null,
+        profilePictureUrl: profile.profile_picture_url ?? null,
+        followersCount: profile.followers_count ?? null,
+        profileSyncedAt: now,
         encryptedAccessToken: this.encryptToken(longLived.access_token),
         tokenExpiresAt: expiresAt,
         status: InstagramAccountStatus.ACTIVE,
@@ -312,12 +386,26 @@ export class InstagramService {
         igUserId: profile.user_id,
         igUsername: profile.username,
         accountType: profile.account_type,
+        displayName: profile.name ?? null,
+        profilePictureUrl: profile.profile_picture_url ?? null,
+        followersCount: profile.followers_count ?? null,
+        profileSyncedAt: now,
         encryptedAccessToken: this.encryptToken(longLived.access_token),
         tokenExpiresAt: expiresAt,
         status: InstagramAccountStatus.ACTIVE,
         disconnectedAt: null,
       },
-      select: { id: true, igUsername: true, accountType: true, status: true, connectedAt: true },
+      select: {
+        id: true,
+        igUsername: true,
+        accountType: true,
+        status: true,
+        connectedAt: true,
+        displayName: true,
+        profilePictureUrl: true,
+        followersCount: true,
+        profileSyncedAt: true,
+      },
     });
 
     this.logger.log(`Instagram account @${profile.username} connected to workspace ${workspaceId}`);
@@ -415,6 +503,53 @@ export class InstagramService {
     });
 
     this.logger.log(`Refreshed Instagram token for account ${accountId}, new expiry ${expiresAt.toISOString()}`);
+
+    // Opportunistic, non-fatal: this job already holds a fresh token, so
+    // it's a natural place to keep the cached profile preview (Accounts
+    // page) from going stale over time without a dedicated polling job.
+    await this.syncProfile(accountId).catch((err) => {
+      this.logger.warn(`Profile sync after token refresh failed for account ${accountId}: ${(err as Error).message}`);
+    });
+  }
+
+  /**
+   * Re-fetches the profile preview fields (name, picture, follower count)
+   * from Meta and caches them — the only place this ever hits the Graph API
+   * live. Called at connect time (handleCallback), opportunistically after
+   * a token refresh, and on-demand via the dashboard's "Refresh profile"
+   * action (InstagramController) — never automatically on every page load.
+   */
+  async syncProfile(accountId: string): Promise<ConnectedAccountSummary> {
+    const credentials = await this.getSendCredentials(accountId);
+    if (!credentials) {
+      throw new AppException(
+        'INSTAGRAM_ACCOUNT_UNAVAILABLE',
+        'This account needs to be reconnected before its profile can be refreshed.',
+      );
+    }
+
+    const profile = await this.fetchProfile(credentials.accessToken);
+
+    return this.prisma.instagramAccount.update({
+      where: { id: accountId },
+      data: {
+        displayName: profile.name ?? null,
+        profilePictureUrl: profile.profile_picture_url ?? null,
+        followersCount: profile.followers_count ?? null,
+        profileSyncedAt: new Date(),
+      },
+      select: {
+        id: true,
+        igUsername: true,
+        accountType: true,
+        status: true,
+        connectedAt: true,
+        displayName: true,
+        profilePictureUrl: true,
+        followersCount: true,
+        profileSyncedAt: true,
+      },
+    });
   }
 
   private requireInstagramAppId(): string {
@@ -502,7 +637,7 @@ export class InstagramService {
   private async fetchProfile(accessToken: string): Promise<InstagramProfileResponse> {
     const meta = this.configService.get('meta', { infer: true });
     const params = new URLSearchParams({
-      fields: 'id,user_id,username,account_type,name',
+      fields: 'id,user_id,username,account_type,name,profile_picture_url,followers_count',
       access_token: accessToken,
     });
 

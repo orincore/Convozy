@@ -2,9 +2,23 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { InstagramLogo, CircleNotch, WarningCircle, CheckCircle } from '@phosphor-icons/react';
+import Image from 'next/image';
+import { ArrowsClockwise, CheckCircle, CircleNotch, InstagramLogo, LinkBreak, WarningCircle } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { ApiError, ConnectedAccount, instagramApi } from '@/lib/api';
+
+const STATUS_LABEL: Record<string, string> = {
+  ACTIVE: 'Active',
+  RATE_LIMITED: 'Rate limited',
+  TOKEN_EXPIRED: 'Reconnect needed',
+  DISCONNECTED: 'Disconnected',
+  ERROR: 'Error',
+};
+
+function followerLabel(count: number | null): string | null {
+  if (count === null) return null;
+  return `${new Intl.NumberFormat('en', { notation: 'compact' }).format(count)} followers`;
+}
 
 function ConnectPrompt({ onConnect, connecting }: { onConnect: () => void; connecting: boolean }) {
   return (
@@ -28,10 +42,103 @@ function ConnectPrompt({ onConnect, connecting }: { onConnect: () => void; conne
   );
 }
 
-function AccountsList({ accounts, onConnectAnother, connecting }: {
+function AccountAvatar({ account }: { account: ConnectedAccount }) {
+  if (account.profilePictureUrl) {
+    return (
+      <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-muted">
+        <Image
+          src={account.profilePictureUrl}
+          alt={`@${account.igUsername}`}
+          fill
+          sizes="36px"
+          className="object-cover"
+          unoptimized
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+      <InstagramLogo size={18} weight="bold" />
+    </div>
+  );
+}
+
+function AccountRow({
+  account,
+  onSync,
+  syncing,
+  onDisconnect,
+  disconnecting,
+}: {
+  account: ConnectedAccount;
+  onSync: () => void;
+  syncing: boolean;
+  onDisconnect: () => void;
+  disconnecting: boolean;
+}) {
+  const followers = followerLabel(account.followersCount);
+  const busy = syncing || disconnecting;
+  return (
+    <div className="flex items-center justify-between gap-4 px-5 py-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <AccountAvatar account={account} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{account.displayName ?? `@${account.igUsername}`}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            @{account.igUsername}
+            {account.accountType && ` · ${account.accountType}`}
+            {followers && ` · ${followers}`}
+          </p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <span
+          className={`text-xs font-medium ${account.status === 'ACTIVE' ? 'text-success' : 'text-danger'}`}
+        >
+          {STATUS_LABEL[account.status] ?? account.status}
+        </span>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={busy}
+          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          aria-label={`Refresh profile for @${account.igUsername}`}
+          title="Refresh profile"
+        >
+          <ArrowsClockwise size={15} className={syncing ? 'animate-spin' : ''} />
+        </button>
+        <button
+          type="button"
+          onClick={onDisconnect}
+          disabled={busy}
+          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
+          aria-label={`Disconnect @${account.igUsername}`}
+          title="Disconnect"
+        >
+          {disconnecting ? <CircleNotch size={15} className="animate-spin" /> : <LinkBreak size={15} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AccountsList({
+  accounts,
+  onConnectAnother,
+  connecting,
+  onSync,
+  syncingId,
+  onDisconnect,
+  disconnectingId,
+}: {
   accounts: ConnectedAccount[];
   onConnectAnother: () => void;
   connecting: boolean;
+  onSync: (accountId: string) => void;
+  syncingId: string | null;
+  onDisconnect: (accountId: string) => void;
+  disconnectingId: string | null;
 }) {
   return (
     <div>
@@ -45,26 +152,14 @@ function AccountsList({ accounts, onConnectAnother, connecting }: {
 
       <div className="mt-6 flex flex-col divide-y divide-border rounded-[var(--radius-card)] border border-border bg-card">
         {accounts.map((account) => (
-          <div key={account.id} className="flex items-center justify-between gap-4 px-5 py-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
-                <InstagramLogo size={18} weight="bold" />
-              </div>
-              <div>
-                <p className="text-sm font-medium">@{account.igUsername}</p>
-                <p className="text-xs text-muted-foreground">
-                  {account.accountType ?? 'Instagram account'}
-                </p>
-              </div>
-            </div>
-            <span
-              className={`text-xs font-medium ${
-                account.status === 'ACTIVE' ? 'text-success' : 'text-danger'
-              }`}
-            >
-              {account.status === 'ACTIVE' ? 'Active' : account.status}
-            </span>
-          </div>
+          <AccountRow
+            key={account.id}
+            account={account}
+            onSync={() => onSync(account.id)}
+            syncing={syncingId === account.id}
+            onDisconnect={() => onDisconnect(account.id)}
+            disconnecting={disconnectingId === account.id}
+          />
         ))}
       </div>
     </div>
@@ -77,6 +172,8 @@ function DashboardHome() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(searchParams.get('instagram_error'));
   const [loading, setLoading] = useState(true);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
 
   useEffect(() => {
     instagramApi
@@ -95,6 +192,39 @@ function DashboardHome() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong');
       setConnecting(false);
+    }
+  }
+
+  async function handleSync(accountId: string) {
+    setSyncingId(accountId);
+    setError(null);
+    try {
+      const updated = await instagramApi.syncProfile(accountId);
+      setAccounts((current) => current?.map((a) => (a.id === accountId ? updated : a)) ?? null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not refresh this account's profile.");
+    } finally {
+      setSyncingId(null);
+    }
+  }
+
+  async function handleDisconnect(accountId: string) {
+    const account = accounts?.find((a) => a.id === accountId);
+    const label = account ? `@${account.igUsername}` : 'this account';
+    const confirmed = window.confirm(
+      `Disconnect ${label}? Automations tied to it will stop sending until you reconnect.`,
+    );
+    if (!confirmed) return;
+
+    setDisconnectingId(accountId);
+    setError(null);
+    try {
+      await instagramApi.disconnect(accountId);
+      setAccounts((current) => current?.filter((a) => a.id !== accountId) ?? null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not disconnect this account.');
+    } finally {
+      setDisconnectingId(null);
     }
   }
 
@@ -122,7 +252,15 @@ function DashboardHome() {
       )}
 
       {accounts && accounts.length > 0 ? (
-        <AccountsList accounts={accounts} onConnectAnother={handleConnect} connecting={connecting} />
+        <AccountsList
+          accounts={accounts}
+          onConnectAnother={handleConnect}
+          connecting={connecting}
+          onSync={handleSync}
+          syncingId={syncingId}
+          onDisconnect={handleDisconnect}
+          disconnectingId={disconnectingId}
+        />
       ) : (
         <ConnectPrompt onConnect={handleConnect} connecting={connecting} />
       )}
