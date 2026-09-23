@@ -836,7 +836,7 @@ that pipeline would not.
   build + migrate + restart + health check) — see that script's own header
   for the mechanics. Live health check clean post-deploy.
 
-**Milestone 3 — Pre-built automation templates: ✅ done, verified locally, pending VPS deploy.**
+**Milestone 3 — Pre-built automation templates: ✅ done, deployed, verified live (2026-09-23).**
 - No schema change — `AutomationTemplate` already existed
   (`20260923010000_billing_features_and_templates`), just unused until now.
 - Backend: new `templates.seed.ts` (5 curated starters spanning COMMENT/
@@ -877,7 +877,12 @@ that pipeline would not.
 - 155/155 backend tests, clean `tsc`/lint on both apps (web: 0 errors, 1
   pre-existing unrelated warning; api: 0 errors, 143 pre-existing `any`-in-test
   warnings, same count as Milestone 2).
-- Not yet deployed to the VPS — next step before starting Milestone 4.
+- Deployed via `infra/scripts/deploy.sh` (`4c11f9c` → `cfb5c1e`), all 3 images
+  rebuilt, no pending migrations. Live health check `{"status":"ok"}`, worker
+  logs confirm `TemplatesController` routes registered and all 5 templates
+  seeded/refreshed on boot, and `GET /automation-templates` against the real
+  public API correctly 401s an invalid token (JwtAuthGuard enforced, no
+  stack trace leaked).
 
 **Milestones 4–10 (comments growth tool, require-follow-gate, sequences,
 broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
