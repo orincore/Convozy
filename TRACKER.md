@@ -836,13 +836,55 @@ that pipeline would not.
   build + migrate + restart + health check) — see that script's own header
   for the mechanics. Live health check clean post-deploy.
 
-**Milestones 3–10 (templates, comments growth tool, require-follow-gate,
-sequences, broadcasts, external-request step, analytics; Follow-to-DM
-dropped — no Meta webhook/endpoint exists for it, verified live against
-current docs)**: not started, full detail in the plan file. Building **one
-at a time**, next up is Milestone 3 (pre-built automation templates — the
-`AutomationTemplate` model already exists in schema, unused) once the user
-confirms readiness to continue.
+**Milestone 3 — Pre-built automation templates: ✅ done, verified locally, pending VPS deploy.**
+- No schema change — `AutomationTemplate` already existed
+  (`20260923010000_billing_features_and_templates`), just unused until now.
+- Backend: new `templates.seed.ts` (5 curated starters spanning COMMENT/
+  STORY_REPLY/LIVE_COMMENT — `reply-link-dm`, `pricing-dm`, `faq-freebie`,
+  `story-reply-thanks`, `live-comment-welcome`), `TemplatesService`
+  (`OnModuleInit` idempotently upserts by `slug` on every boot, `list()`,
+  `install(workspaceId, templateId, instagramAccountId)` — gated behind
+  `FEATURE_KEYS.AUTOMATION_TEMPLATES`, deserializes the template into a real
+  `CreateAutomationDto` and delegates to `AutomationsService.create` rather
+  than duplicating any validation/entitlement logic (CLAUDE.md §3 rule 1)),
+  `TemplatesController` (`GET /automation-templates`,
+  `POST /automation-templates/:id/install`). `AutomationWithRelations`
+  exported from `automations.service.ts` (was private) for the new service's
+  return type. 8 new tests.
+- Frontend: **deliberately does not call the `install` endpoint.** Per the
+  design already documented in `templates.seed.ts`'s own header comment, the
+  "New automation" builder (`automations/new/page.tsx`) fetches
+  `GET /automation-templates` and, on "Use this template," prefills the
+  *existing* local trigger/action-step state (name, triggers, action tree)
+  for review and editing before the user hits the real "Create automation"
+  submit — never a blind install. Rationale: there is no automation-edit
+  page yet (only create), and templates default to `status: ACTIVE`, so a
+  blind install would go live with unedited placeholder copy
+  (`[add your link here]`) with no UI path to fix it before it starts
+  firing. The `install` REST endpoint itself is still fully real, tested,
+  and reachable (a legitimate API surface for future direct-install
+  entry points) — just not this surface's chosen path. New `TemplatePicker`
+  component (inline in `new/page.tsx`, matching the existing `PostPicker`/
+  `MediaThumb` local-component convention), `templatesApi`/`AutomationTemplate`
+  added to `lib/api.ts`.
+- Verified end-to-end via headless Playwright against the real local API/DB:
+  all 5 template cards render with correct source badges, "Use this
+  template" prefills name/triggers/keywords/message text correctly, the
+  confirmation banner + "Clear" reset both work, and a full submit
+  (template → Create automation) round-trips through the real API and
+  persists the correct trigger row (`LIVE_COMMENT`/`CONTAINS`/`{}` keywords)
+  in Postgres. Zero browser console errors throughout.
+- 155/155 backend tests, clean `tsc`/lint on both apps (web: 0 errors, 1
+  pre-existing unrelated warning; api: 0 errors, 143 pre-existing `any`-in-test
+  warnings, same count as Milestone 2).
+- Not yet deployed to the VPS — next step before starting Milestone 4.
+
+**Milestones 4–10 (comments growth tool, require-follow-gate, sequences,
+broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
+webhook/endpoint exists for it, verified live against current docs)**: not
+started, full detail in the plan file. Building **one at a time**, next up
+is Milestone 4 (Comments Growth Tool) once the user confirms readiness to
+continue.
 
 ## Phase 6 — AI features
 

@@ -35,7 +35,7 @@ import { TriggerDto } from './dto/trigger.dto';
 // A CONDITION action's THEN/ELSE children, recursively — each child can
 // itself be a CONDITION, bounded at write time by MAX_ACTION_TREE_DEPTH.
 type ActionWithTree = Action & { condition: Condition | null; children: ActionWithTree[] };
-type AutomationWithRelations = Automation & { triggers: Trigger[]; actions: ActionWithTree[] };
+export type AutomationWithRelations = Automation & { triggers: Trigger[]; actions: ActionWithTree[] };
 
 const REGEX_TIMEOUT_MS = 50;
 // A sane recursion bound for nested condition branches (Milestone 1,

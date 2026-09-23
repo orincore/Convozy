@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, CheckCircle, CircleNotch, ImageSquare, Plus, Trash, WarningCircle } from '@phosphor-icons/react';
+import { ArrowLeft, CheckCircle, CircleNotch, ImageSquare, MagicWand, Plus, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import {
   ActionStepEditor,
   ActionStepNode,
@@ -20,11 +21,13 @@ import {
 } from '@/components/automations/action-step-editor';
 import {
   ApiError,
+  AutomationTemplate,
   ConnectedAccount,
   CreateAutomationInput,
   RecentMediaItem,
   instagramApi,
   automationsApi,
+  templatesApi,
   TriggerSource,
   TriggerMatchType,
   AutomationScopeType,
@@ -51,6 +54,81 @@ const MATCH_TYPES: { value: TriggerMatchType; label: string; hint: string }[] = 
 
 function emptyTrigger(): TriggerRow {
   return { source: 'COMMENT', matchType: 'CONTAINS', keywords: '', caseSensitive: false };
+}
+
+const SOURCE_LABELS: Record<TriggerSource, string> = {
+  COMMENT: 'Comment',
+  DM: 'DM',
+  STORY_REPLY: 'Story reply',
+  LIVE_COMMENT: 'Live comment',
+};
+
+function TemplatePicker({
+  templates,
+  error,
+  onUse,
+}: {
+  templates: AutomationTemplate[] | null;
+  error: string | null;
+  onUse: (template: AutomationTemplate) => void;
+}) {
+  if (error) {
+    // Non-fatal: the blank-form builder below still works fully without
+    // templates, so a fetch failure here is shown but never blocks the page.
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <WarningCircle size={13} />
+        Couldn&apos;t load templates ({error}) — you can still build from scratch below.
+      </p>
+    );
+  }
+
+  if (templates === null) {
+    return (
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-[122px] w-64 shrink-0 animate-pulse rounded-[var(--radius-card)] border border-border bg-card"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (templates.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {templates.map((template) => {
+        const sources = Array.from(new Set(template.triggers.map((t) => t.source)));
+        return (
+          <div
+            key={template.id}
+            className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-card p-4"
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((source) => (
+                <Badge key={source} variant="outline">
+                  {SOURCE_LABELS[source]}
+                </Badge>
+              ))}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">{template.name}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="mt-auto" onClick={() => onUse(template)}>
+              <Sparkle size={13} />
+              Use this template
+            </Button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function MediaThumb({
@@ -217,6 +295,9 @@ export default function NewAutomationPage() {
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<AutomationTemplate[] | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(null);
 
   useEffect(() => {
     instagramApi
@@ -226,7 +307,38 @@ export default function NewAutomationPage() {
         if (list.length > 0) setAccountId(list[0].id);
       })
       .catch((err: ApiError) => setError(err.message));
+    templatesApi.list().then(setTemplates).catch((err: ApiError) => setTemplatesError(err.message));
   }, []);
+
+  function applyTemplate(template: AutomationTemplate) {
+    setName(template.name);
+    setTriggers(
+      template.triggers.map((t) => ({
+        source: t.source,
+        matchType: t.matchType,
+        keywords: t.keywords.join(', '),
+        caseSensitive: t.caseSensitive ?? false,
+      })),
+    );
+    setActionSteps(
+      template.actions.map((a) => ({
+        ...emptyActionStep(a.type),
+        text: a.payload?.text ?? '',
+        delaySeconds: String(a.delaySeconds ?? 0),
+      })),
+    );
+    setScopeType('ALL_POSTS');
+    setSelectedMediaIds([]);
+    setAppliedTemplateName(template.name);
+    setError(null);
+  }
+
+  function clearTemplate() {
+    setName('');
+    setTriggers([emptyTrigger()]);
+    setActionSteps([emptyActionStep()]);
+    setAppliedTemplateName(null);
+  }
 
   function updateTrigger(index: number, patch: Partial<TriggerRow>) {
     setTriggers((current) => current.map((t, i) => (i === index ? { ...t, ...patch } : t)));
@@ -325,6 +437,30 @@ export default function NewAutomationPage() {
       <p className="mt-1 text-sm text-muted-foreground">
         Comment or reply to a story with a keyword, get a reply automatically.
       </p>
+
+      <section className="mt-8 flex flex-col gap-4">
+        {appliedTemplateName ? (
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-border bg-card px-4 py-3 text-sm">
+            <span className="flex items-center gap-2 text-foreground">
+              <MagicWand size={15} />
+              Prefilled from &ldquo;{appliedTemplateName}&rdquo; - review and edit before creating.
+            </span>
+            <button
+              type="button"
+              onClick={clearTemplate}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X size={12} />
+              Clear
+            </button>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-sm font-semibold text-foreground">Start from a template</h2>
+            <TemplatePicker templates={templates} error={templatesError} onUse={applyTemplate} />
+          </>
+        )}
+      </section>
 
       <form onSubmit={handleSubmit} className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
         <div className="flex flex-col gap-8">

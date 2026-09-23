@@ -4,11 +4,13 @@ import { InstagramModule } from '../instagram/instagram.module';
 import { BillingModule } from '../billing/billing.module';
 import { AutomationsController } from './automations.controller';
 import { AutomationsService } from './automations.service';
+import { TemplatesController } from './templates.controller';
+import { TemplatesService } from './templates.service';
 
 @Module({
   imports: [QueueModule, InstagramModule, BillingModule],
-  controllers: [AutomationsController],
-  providers: [AutomationsService],
+  controllers: [AutomationsController, TemplatesController],
+  providers: [AutomationsService, TemplatesService],
   exports: [AutomationsService],
 })
 export class AutomationsModule {}

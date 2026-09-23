@@ -217,6 +217,27 @@ export const automationsApi = {
   remove: (id: string) => authFetch<void>(`/automations/${id}`, { method: 'DELETE' }),
 };
 
+// ── Automation templates (Milestone 3) ─────────────────────────────────────
+
+// Curated starter automations — GET returns the full trigger/action payload
+// so the "New automation" builder can prefill its own local state for
+// review/editing rather than installing blind (see templates.seed.ts on the
+// backend for the design rationale).
+export interface AutomationTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  triggers: TriggerInput[];
+  actions: ActionInput[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const templatesApi = {
+  list: () => authFetch<AutomationTemplate[]>('/automation-templates'),
+};
+
 // ── Activity feed ───────────────────────────────────────────────────────
 
 export type CommentEventStatus = 'PENDING' | 'MATCHED' | 'NO_MATCH' | 'PROCESSED' | 'FAILED';
