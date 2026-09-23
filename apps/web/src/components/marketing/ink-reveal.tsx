@@ -1,80 +1,69 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { useReducedMotion } from 'motion/react';
-import type { ReactNode } from 'react';
+import { useEffect } from 'react';
+import { motion, useAnimationControls, useReducedMotion } from 'motion/react';
+
+const EASE = [0.32, 0.72, 0, 1] as [number, number, number, number];
+
+const container = {
+  hidden: { transition: { staggerChildren: 0.025, staggerDirection: -1 } },
+  visible: { transition: { staggerChildren: 0.07 } },
+};
+
+const char = {
+  hidden: { opacity: 0, y: '0.35em', filter: 'blur(10px)', transition: { duration: 0.45, ease: EASE } },
+  visible: { opacity: 1, y: '0em', filter: 'blur(0px)', transition: { duration: 1.4, ease: EASE } },
+};
 
 /**
- * Headline words that resolve out of liquid noise on load, then settle into
- * crisp type. Adapted from Spectrum UI's Fluid Ink Morph (spectrumhq.in):
- * ported to our tokens (monochrome), and the SVG filter is removed once the
- * animation ends so the text is rendered normally afterwards.
+ * Headline words that rise out of a soft blur one letter at a time, hold,
+ * fade back out and play again. Only transform, opacity and a small blur are
+ * animated, so it runs on the GPU and stays smooth (the earlier SVG noise
+ * filter was recalculated on the CPU every frame and stuttered).
  */
-export function InkReveal({
-  children,
-  settleMs = 4200,
-  repeatAfterMs = 7000,
-}: {
-  children: ReactNode;
-  settleMs?: number;
-  repeatAfterMs?: number;
-}) {
+export function InkReveal({ text, holdMs = 6000 }: { text: string; holdMs?: number }) {
   const reduce = useReducedMotion();
-  const id = useId().replace(/:/g, '_');
-  const turb = useRef<SVGFETurbulenceElement>(null);
-  const disp = useRef<SVGFEDisplacementMapElement>(null);
-  const [done, setDone] = useState(false);
+  const controls = useAnimationControls();
 
   useEffect(() => {
-    if (!done || reduce) return;
-    const t = setTimeout(() => setDone(false), repeatAfterMs);
-    return () => clearTimeout(t);
-  }, [done, reduce, repeatAfterMs]);
-
-  useEffect(() => {
-    if (reduce || done) return;
-    let frame = 0;
-    let start: number | null = null;
-    const tick = (t: number) => {
-      if (start === null) start = t;
-      const p = Math.min(1, (t - start) / settleMs);
-      const ease = p * p * (3 - 2 * p);
-      const freq = 0.28 + (0.002 - 0.28) * ease;
-      turb.current?.setAttribute('baseFrequency', `${freq} ${freq * 0.9}`);
-      disp.current?.setAttribute('scale', `${60 * (1 - ease)}`);
-      if (p < 1) frame = requestAnimationFrame(tick);
-      else setDone(true);
+    if (reduce) return;
+    let cancelled = false;
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      while (!cancelled) {
+        await controls.start('visible');
+        await wait(holdMs);
+        if (cancelled) return;
+        await controls.start('hidden');
+        await wait(350);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controls.stop();
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [reduce, done, settleMs]);
+  }, [controls, reduce, holdMs]);
 
-  if (reduce || done) return <span className="text-shimmer">{children}</span>;
+  if (reduce) return <span>{text}</span>;
 
   return (
-    <span className="text-shimmer relative inline-block" style={{ filter: `url(#ink_${id})` }}>
-      {children}
-      <svg width="0" height="0" className="absolute" aria-hidden="true">
-        <filter id={`ink_${id}`}>
-          <feTurbulence
-            ref={turb}
-            type="fractalNoise"
-            baseFrequency="0.28 0.25"
-            numOctaves="2"
-            stitchTiles="stitch"
-            seed="7"
-            result="noise"
-          />
-          <feDisplacementMap
-            ref={disp}
-            in="SourceGraphic"
-            in2="noise"
-            scale="60"
-            xChannelSelector="R"
-            yChannelSelector="G"
-          />
-        </filter>
-      </svg>
-    </span>
+    <motion.span
+      aria-label={text}
+      className="inline-block whitespace-nowrap"
+      variants={container}
+      initial="hidden"
+      animate={controls}
+    >
+      {text.split('').map((c, i) => (
+        <motion.span
+          key={i}
+          aria-hidden="true"
+          variants={char}
+          className="inline-block will-change-[transform,opacity,filter]"
+        >
+          {c === ' ' ? ' ' : c}
+        </motion.span>
+      ))}
+    </motion.span>
   );
 }

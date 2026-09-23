@@ -115,7 +115,7 @@ export default function HomePage() {
       <section className="mx-auto grid max-w-7xl items-center gap-16 px-4 pt-12 pb-20 sm:px-6 lg:grid-cols-2 lg:pt-20">
         <div>
           <h1 className="font-display text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-6xl lg:text-7xl">
-            Turn Instagram comments into <InkReveal>instant DMs</InkReveal>
+            Turn Instagram comments into <InkReveal text="instant DMs" />
           </h1>
           <BlurHighlight
             as="p"
