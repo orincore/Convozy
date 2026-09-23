@@ -19,6 +19,9 @@ FROM deps AS build
 # several redeploys before this was traced (see TRACKER.md Phase 9).
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+# Public site origin: baked into canonical/OG/sitemap URLs at build time.
+ARG NEXT_PUBLIC_APP_BASE_URL
+ENV NEXT_PUBLIC_APP_BASE_URL=$NEXT_PUBLIC_APP_BASE_URL
 COPY . .
 RUN pnpm --filter=@convozy/shared build
 RUN pnpm --filter=@convozy/web build
