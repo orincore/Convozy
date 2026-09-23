@@ -124,6 +124,22 @@ describe('MediaService.uploadFile', () => {
     expect(result.type).toBe('audio');
   });
 
+  it('normalizes the R2 Content-Type to the canonical MIME type regardless of what the browser reported (audio/x-m4a -> audio/mp4)', async () => {
+    // Regression test: Chrome/Safari report .m4a uploads as "audio/x-m4a",
+    // a non-standard type Meta's Graph API rejects when fetching the
+    // attachment URL (fails the whole DM send with a generic "upload
+    // failed", error_subcode 2018007) even though the file itself is fine.
+    const service = new MediaService(makeConfigService());
+
+    await service.uploadFile(
+      'workspace-1',
+      makeFile({ mimetype: 'audio/x-m4a', originalname: 'voice-note.m4a', size: 2 * 1024 * 1024 }),
+    );
+
+    const putInput = sendMock.mock.calls[0][0];
+    expect(putInput.ContentType).toBe('audio/mp4');
+  });
+
   it('allows a video up to its own larger 25MB cap', async () => {
     const service = new MediaService(makeConfigService());
 

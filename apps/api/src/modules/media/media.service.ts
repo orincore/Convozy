@@ -15,6 +15,15 @@ interface MediaTypeSpec {
   kind: MediaKind;
   maxBytes: number;
   extension: string;
+  // The Content-Type stored on the R2 object and thus served to Meta's
+  // fetcher — deliberately NOT always equal to the map key. Browsers report
+  // non-standard MIME types for some containers (e.g. Chrome/Safari send
+  // "audio/x-m4a" for .m4a files, which isn't an IANA-registered type).
+  // Meta's server rejects unrecognized Content-Type headers with a generic
+  // "upload failed" (error_subcode 2018007) even though the file itself is
+  // fine — so every upload is re-served under its canonical MIME type
+  // regardless of what the uploading browser claimed.
+  canonicalContentType: string;
 }
 
 // Keyed by MIME type. Deliberately only the formats Meta documents as
@@ -34,21 +43,24 @@ interface MediaTypeSpec {
 // like the private-reply-attachment combination elsewhere in this file:
 // shipped as best-effort, watch MessageLog for a Graph API rejection.
 const SUPPORTED_MIME_TYPES: Record<string, MediaTypeSpec> = {
-  'image/png': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'png' },
-  'image/jpeg': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'jpg' },
-  'image/gif': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'gif' },
-  'video/mp4': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'mp4' },
-  'video/ogg': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'ogv' },
-  'video/webm': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'webm' },
-  'video/quicktime': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'mov' },
-  'video/x-msvideo': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'avi' },
-  'audio/aac': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'aac' },
-  'audio/mp4': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a' },
-  'audio/x-m4a': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a' },
-  'audio/wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav' },
-  'audio/x-wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav' },
-  'audio/mpeg': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'mp3' },
-  'application/pdf': { kind: 'file', maxBytes: 25 * 1024 * 1024, extension: 'pdf' },
+  'image/png': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'png', canonicalContentType: 'image/png' },
+  'image/jpeg': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'jpg', canonicalContentType: 'image/jpeg' },
+  'image/gif': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'gif', canonicalContentType: 'image/gif' },
+  'video/mp4': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'mp4', canonicalContentType: 'video/mp4' },
+  'video/ogg': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'ogv', canonicalContentType: 'video/ogg' },
+  'video/webm': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'webm', canonicalContentType: 'video/webm' },
+  'video/quicktime': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'mov', canonicalContentType: 'video/quicktime' },
+  'video/x-msvideo': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'avi', canonicalContentType: 'video/x-msvideo' },
+  // m4a's canonical/IANA-registered type is audio/mp4 — "audio/x-m4a" (what
+  // Chrome/Safari actually report for the file) is accepted as upload
+  // input but never stored as the served Content-Type.
+  'audio/aac': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'aac', canonicalContentType: 'audio/aac' },
+  'audio/mp4': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a', canonicalContentType: 'audio/mp4' },
+  'audio/x-m4a': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a', canonicalContentType: 'audio/mp4' },
+  'audio/wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav', canonicalContentType: 'audio/wav' },
+  'audio/x-wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav', canonicalContentType: 'audio/wav' },
+  'audio/mpeg': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'mp3', canonicalContentType: 'audio/mpeg' },
+  'application/pdf': { kind: 'file', maxBytes: 25 * 1024 * 1024, extension: 'pdf', canonicalContentType: 'application/pdf' },
 };
 
 export interface UploadedMediaFile {
@@ -119,7 +131,7 @@ export class MediaService {
           Bucket: r2.bucketName,
           Key: key,
           Body: file.buffer,
-          ContentType: file.mimetype,
+          ContentType: spec.canonicalContentType,
         }),
       );
     } catch (err) {
