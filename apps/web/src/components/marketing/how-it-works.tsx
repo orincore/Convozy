@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { AnimatePresence, motion, useInView, useReducedMotion, useScroll, useTransform } from 'motion/react';
+import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/react';
 import { CheckCircle, ChatCircleText, Eye, PaperPlaneTilt } from '@phosphor-icons/react';
 
 const EASE = [0.32, 0.72, 0, 1] as [number, number, number, number];
@@ -87,8 +87,8 @@ function WatchPane() {
       ))}
       <motion.span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 h-10 bg-gradient-to-b from-transparent via-white/10 to-transparent"
-        animate={{ y: [-40, 170] }}
+        className="pointer-events-none absolute inset-x-0 h-20 bg-gradient-to-b from-transparent via-white/[0.05] to-transparent"
+        animate={{ y: [-80, 170] }}
         transition={{ duration: 3.2, repeat: Infinity, ease: 'linear' }}
       />
     </Pane>
@@ -108,7 +108,7 @@ function SendPane() {
         >
           <PaperPlaneTilt size={16} weight="fill" />
         </motion.span>
-        <div className="absolute inset-x-8 top-1/2 h-px bg-gradient-to-r from-white/40 to-white/5" />
+        <div className="absolute inset-x-8 top-1/2 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
       </div>
       <AnimatePresence>
         {i >= 2 && (
@@ -128,27 +128,19 @@ function SendPane() {
 }
 
 /**
- * Three-step explainer. A line linking the steps fills as you scroll, each
- * step's badge turns from a pulsing "in progress" dot into a check in turn,
+ * Three-step explainer. Each step's badge turns from a pulsing "in progress" dot into a check in turn,
  * and each card plays a small looping scene. Step progress is based on the
  * layout of Spectrum UI's Agent Steps (running dot, then a popped check).
  */
 export function HowItWorks() {
   const reduce = useReducedMotion();
   const section = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({ target: section, offset: ['start 75%', 'end 60%'] });
-  const fill = useTransform(scrollYProgress, [0, 1], [0, 1]);
   const inView = useInView(section, { once: true, amount: 0.3 });
   const scenes = [KeywordPane, WatchPane, SendPane];
   const icons = [ChatCircleText, Eye, PaperPlaneTilt];
 
   return (
     <div ref={section} className="relative">
-      <div className="pointer-events-none absolute left-[16.66%] right-[16.66%] top-[3.15rem] hidden h-px md:block" aria-hidden="true">
-        <div className="absolute inset-0 bg-white/10" />
-        <motion.div className="absolute inset-0 origin-left bg-gradient-to-r from-white to-white/60" style={{ scaleX: reduce ? 1 : fill }} />
-      </div>
-
       <div className="grid gap-6 md:grid-cols-3">
         {STEPS.map((step, n) => {
           const Scene = scenes[n];
