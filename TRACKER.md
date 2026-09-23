@@ -223,7 +223,132 @@ scoping new phases/features rather than re-researching ManyChat from scratch.
 - ☐ Still pending: full automation-builder UI, analytics views, settings
   (all Phase 2-4, nothing to design yet since the backend doesn't exist).
 
----
+## Phase 0.6b — Marketing site polish pass (added 2026-09-23)
+
+- ✅ Interactive layer added per `taste-skill`, reserved for the marketing
+  site only (dashboard/CRM untouched, per user directive): `SpotlightCard`
+  (`components/marketing/spotlight-card.tsx`, cursor-tracked border glow on
+  bento/plan cards) and `Magnetic` (`components/marketing/magnetic.tsx`,
+  cursor-pull on the page's one primary CTA per view). Both use Motion
+  values (`useMotionValue`/`useMotionTemplate`/`useSpring`) exclusively, no
+  `useState` on pointer input, both collapse to static under
+  `prefers-reduced-motion`.
+- ✅ **Fixed a real honesty gap**: the homepage bento and pricing Pro plan
+  advertised "AI-personalized replies" and "AI matching" as available today.
+  Per this file's Phase 6 log, the `AiProvider` interface and every AI
+  feature are still unbuilt (`AI_INTENT` trigger always no-matches;
+  `SEND_AI_REPLY` enqueues a job with nothing to process it). Copy corrected
+  to describe only what Phase 2/3 actually ship (exact/contains/regex
+  matching, deduplicated sends); the Pro plan now labels AI replies
+  "Coming soon" instead of implying they work.
+- ✅ `/features` rebuilt: was a bare one-item list. Now a spotlighted "live"
+  card for comment-to-DM plus an honestly-labeled "In development" section
+  (DM keyword automation, Story reply automation, Live comment automation)
+  reflecting `CLAUDE.md` §1's stated product scope without claiming those
+  ship today.
+- ✅ `/features/comment-to-dm` and `/pricing` both gained a real FAQ section
+  with matching `FAQPage` JSON-LD (CLAUDE.md §11); comment-to-dm also gained
+  an exact/contains/regex match-type bento (previously implied AI matching
+  that isn't built).
+- ✅ Verified: `tsc --noEmit`, `eslint` on touched paths, and `next build`
+  all clean; all marketing routes return 200 on the running dev server.
+
+## Phase 0.6c — Marketing visual overhaul (added 2026-09-23)
+
+User asked for a "cursor.com-exact" clone plus a paid React Bits Pro
+component and an "official Meta partner" badge. Declined two of the three
+as asked, with honest substitutes (see AskUserQuestion resolution below and
+chat log): (1) pixel-cloning a specific competitor's commercial design is a
+design-plagiarism risk for a paid product, built an original composition in
+the same dark dev-tool register instead; (2) React Bits Pro's
+`@reactbits-starter/blur-highlight-tw` needs a paid license key + registry
+auth not present in this repo (`components.json`/`.npmrc` checked, neither
+exists) - rebuilt the same blur-in-highlight effect natively with Motion;
+(3) "official Meta partner" is a real accreditation Convozy doesn't hold -
+user picked the honest option (an "Built on Instagram's API" badge, no
+partnership claimed) via AskUserQuestion.
+
+- ✅ New components (`components/marketing/`): `AutomationPreview`
+  (replaces `hero-visual.tsx`, deleted - a bigger "code editor" style panel
+  showing a real trigger/action rule plus the comment-to-DM flow playing
+  out, monochrome "syntax highlight" via weight/opacity not hue),
+  `BlurHighlight` (word-by-word blur-in + highlight, Motion
+  `staggerChildren`, own build per above), `IntegrationBadges` (real
+  Instagram + Meta SVG marks via Simple Icons CDN, "Built on" framing, not
+  "partner"), `MarketingBackdrop` (fixed grid-line + glow-blob background,
+  pure CSS, rendered once at the marketing layout root per taste-skill 4.11
+  page-theme-lock, not per-section).
+- ✅ Display typeface: self-hosted `Space Grotesk` via `next/font/google`
+  (`--font-space-grotesk` -> theme token `--font-display` in
+  `globals.css`), scoped to the `(marketing)` layout only so the dashboard
+  keeps plain Geist - applied to every `<h1>`/major `<h2>` across `/`,
+  `/features`, `/features/comment-to-dm`, `/pricing`.
+- ✅ Verified: `tsc --noEmit`, `eslint`, `next build` all clean (22 routes
+  prerendered); `cdn.simpleicons.org` logo URLs confirmed 200; dev server
+  serves all four touched routes 200 with the new components rendering.
+- ✅ **Creator-friendly copy pass** (user directive, 2026-09-24): removed
+  jargon from `/`, `/features`, `/features/comment-to-dm`, `/pricing`
+  ("regex", "webhook", "deduplicated", "trigger word", "usage-based",
+  "activity log", "priority"). The hero panel is now a plain-language rule
+  ("When someone comments PRICE, send them a DM") instead of code-style
+  text. Added a "you built the audience, replying shouldn't cost you"
+  message on the homepage. Deliberately NOT done: fake scarcity, countdowns,
+  user counts or testimonials (none are real); the urgency used is only the
+  true cost of unanswered comments. "Free plan" claims match Phase 2/3
+  reality; Pro AI replies still labeled "Coming soon".
+- ✅ **Spectrum UI** (spectrumhq.in) MCP connected; Bento Card adapted into
+  `SpotlightCard` (hover spotlight, orbiting border, optional tilt; ported
+  from framer-motion/lucide to motion/react + our tokens, animation only on
+  hover). Not installed into the repo directly: it pulls lucide-react and
+  framer-motion (a second icon set and animation lib). Its pricing
+  comparison table and floating navbar were reviewed and skipped (table would
+  duplicate the plan cards; navbar is an app dock, not a site header).
+- ✅ **"Alive" marketing pass** (user directive, 2026-09-24), modeled on
+  ui.spectrumhq.in's live-demo-card structure and Spectrum's animated
+  assets, styled per the soft-skill high-end direction inside the locked
+  monochrome theme: floating glass-pill nav with burger-to-X morph and
+  staggered full-screen menu; double-bezel cards (`Bezel`); pill CTAs with
+  nested arrow (`CtaButton`); blur-fade scroll reveals on a spring curve;
+  headline words that resolve from liquid noise (`InkReveal`); rotating
+  circular text badge (`CurvedRing`); interactive keyword demo that types a
+  comment and sends a DM (`LiveDemo`) plus a sliding DM list
+  (`ActivityFeed`), both labeled "Example"; animated FAQ accordion; node
+  lattice that lights under the pointer behind the final CTA (`Lattice`);
+  pointer-lit oversized wordmark in the footer (`WordmarkGlow`). No invented
+  stats, users, testimonials or scarcity anywhere. Spectrum sources were
+  adapted (framer-motion to motion/react, tokens, hover-only or one-shot
+  animation), not installed as dependencies.
+- ✅ **Living backdrop + hero phone story** (2026-09-24): site-wide fixed
+  backdrop now has a scroll-parallax grid, three slow drifting light orbs,
+  26 floating dust specks and a cursor-trailing glow (transform/opacity only,
+  all off under reduced motion). Spectrum's catalog has no real background
+  assets (its "particle footer" is a static blur), so this is our own build.
+  Hero visual is a generic phone: post, comments sheet (grabber, avatars,
+  times, Reply, nested creator reply), island notification, DM arriving.
+  iOS: safe-area nav offset, viewport-fit=cover, Safari clip/compositing
+  fixes; phone scales down under 360px. Needs a real-iPhone check.
+- ✅ **Comment Art share page** (2026-09-24): `/art/[id]` with `generateMetadata`
+  (OG title/description/site name "Created by Convozy", 1200x630 OG image),
+  `/art/[id]/image` (1080x1920 story PNG) and `/art/[id]/og`, both generated
+  with `next/og`, and `InstagramShareButton` (Web Share API with a File,
+  image prefetched so share() runs inside the tap, iOS-safe; download +
+  copy-link fallback for desktop and in-app browsers). **Only `/art/sample`
+  exists**: nothing in the API generates Comment Art from real comments yet
+  (the brief assumed it did), so data is a static sample in
+  `src/lib/comment-art.ts`. Instagram ignores share text/links, so the link
+  is baked into the image and copied to the clipboard. Verified in headless
+  iPhone emulation with a mocked share API (share called with a 176KB
+  image/png File); NOT yet verified on a real iPhone.
+- ✅ Brand logo: `assets/convozy-logo-white.png` now used for nav, footer,
+  login and dashboard sidebar and the art image (resized copies in
+  `public/brand/`); black logo is the tab icon (`src/app/icon.png`, on a
+  white rounded tile so it stays visible on dark tab bars, plus
+  `apple-icon.png`).
+- ✅ **De-jargoned "Meta Graph API" site-wide** (user directive, 2026-09-24):
+  the integration badge now labels the Meta mark just "Meta"; every prose
+  mention of "Graph API" (`/privacy`, `/terms`, `/data-deletion`) reworded to
+  plain "Meta" without losing meaning. `grep -rn "Graph API" src` returns
+  nothing outside the code comment documenting the decision.
 
 ## Phase 1 — Instagram connection & webhook pipeline
 

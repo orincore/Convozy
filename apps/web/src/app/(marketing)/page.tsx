@@ -6,13 +6,24 @@ import {
   PaperPlaneTilt,
   Lightning,
   MagicWand,
-  Robot,
+  ShieldCheck,
   Gift,
 } from '@phosphor-icons/react/dist/ssr';
 import { JsonLd } from '@/components/seo/json-ld';
 import { Button } from '@/components/ui/button';
-import { HeroVisual } from '@/components/marketing/hero-visual';
+import { Bezel } from '@/components/marketing/bezel';
+import { CtaButton } from '@/components/marketing/cta-button';
+import { InkReveal } from '@/components/marketing/ink-reveal';
+import { LiveDemo } from '@/components/marketing/live-demo';
+import { ActivityFeed } from '@/components/marketing/activity-feed';
+import { Parallax } from '@/components/marketing/parallax';
+import { Faq } from '@/components/marketing/faq';
+import { Lattice } from '@/components/marketing/lattice';
+import { AutomationPreview } from '@/components/marketing/automation-preview';
 import { Reveal } from '@/components/marketing/reveal';
+import { SpotlightCard } from '@/components/marketing/spotlight-card';
+import { BlurHighlight } from '@/components/marketing/blur-highlight';
+import { IntegrationBadges } from '@/components/marketing/integration-badges';
 
 /**
  * Homepage - unique title/description per CLAUDE.md §11, targeting real
@@ -44,18 +55,44 @@ export const metadata: Metadata = {
 const STEPS = [
   {
     icon: ChatCircleText,
-    title: 'Set your trigger word',
-    body: 'Pick a keyword, like "PRICE" or "LINK", tied to a post or Reel.',
+    title: 'Pick your keyword',
+    body: 'Something like "PRICE" or "LINK", tied to a post or Reel.',
   },
   {
     icon: Eye,
-    title: 'Convozy watches for it',
-    body: 'Every new comment is checked in real time against your automations.',
+    title: "Convozy keeps watch",
+    body: 'Every comment gets checked the second it comes in, day or night.',
   },
   {
     icon: PaperPlaneTilt,
     title: 'They get an instant DM',
-    body: 'The reply, link, or AI-personalized message lands in seconds.',
+    body: 'The reply or link lands in their inbox in seconds. You never lift a finger.',
+  },
+];
+
+const FAQS = [
+  {
+    question: 'How does comment-to-DM automation work?',
+    answer:
+      'You pick a keyword like PRICE. When someone comments it on your post or Reel, Convozy sends them your DM straight away. You never type a reply.',
+  },
+  {
+    question: 'Is it really free?',
+    answer:
+      'Yes. The Free plan is not a trial and needs no card. Paid plans are only for creators who send a lot of DMs or run more than one account.',
+  },
+  {
+    question: 'Will people get the same DM twice?',
+    answer: 'No. Every comment gets one reply, even if Instagram tells us about it more than once.',
+  },
+  {
+    question: 'Do I need to know how to code?',
+    answer: 'Not at all. You choose a keyword, write your message and switch it on.',
+  },
+  {
+    question: 'Can I disconnect my Instagram account?',
+    answer:
+      'Any time. Disconnecting stops Convozy straight away, and you can ask us to delete your data.',
   },
 ];
 
@@ -63,24 +100,11 @@ export default function HomePage() {
   const faqJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: [
-      {
-        '@type': 'Question',
-        name: 'How does Instagram comment-to-DM automation work?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: 'Convozy watches comments on your Instagram posts and Reels in real time. When someone comments a keyword you choose, Convozy automatically sends them a DM, instantly and without manual work.',
-        },
-      },
-      {
-        '@type': 'Question',
-        name: 'Is Convozy free to use?',
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: 'Yes. Convozy has a free tier for creators getting started, with paid plans for higher volume and AI-powered features.',
-        },
-      },
-    ],
+    mainEntity: FAQS.map((f) => ({
+      '@type': 'Question',
+      name: f.question,
+      acceptedAnswer: { '@type': 'Answer', text: f.answer },
+    })),
   };
 
   return (
@@ -88,33 +112,71 @@ export default function HomePage() {
       <JsonLd data={faqJsonLd} />
 
       {/* Hero: asymmetric split */}
-      <section className="mx-auto grid max-w-7xl items-center gap-12 px-4 pt-16 pb-20 sm:px-6 lg:grid-cols-2 lg:pt-24">
+      <section className="mx-auto grid max-w-7xl items-center gap-16 px-4 pt-12 pb-20 sm:px-6 lg:grid-cols-2 lg:pt-20">
         <div>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-            Turn Instagram comments into instant DMs
+          <h1 className="font-display text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-6xl lg:text-7xl">
+            Turn Instagram comments into <InkReveal>instant DMs</InkReveal>
           </h1>
-          <p className="mt-5 max-w-md text-lg text-muted-foreground">
-            Comment a keyword, get an instant DM. Convozy automates the reply so you don&apos;t
-            have to.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Button asChild size="lg">
-              <Link href="/app/login">Start free</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link href="/features/comment-to-dm">See how it works</Link>
-            </Button>
+          <BlurHighlight
+            as="p"
+            text="Comment a keyword, get an instant DM. Convozy automates the reply so you don't have to."
+            highlight={['keyword', 'instant', "don't"]}
+            className="mt-6 max-w-md text-lg text-muted-foreground"
+          />
+          <div className="mt-10 flex flex-wrap items-center gap-3">
+            <CtaButton href="/app/login">Start free</CtaButton>
+            <CtaButton href="/features/comment-to-dm" variant="ghost">
+              See how it works
+            </CtaButton>
           </div>
         </div>
 
-        <HeroVisual />
+        <div className="relative">
+          <AutomationPreview />
+        </div>
+      </section>
+
+      <div className="mx-auto max-w-7xl px-4 pb-16 sm:px-6">
+        <IntegrationBadges />
+      </div>
+
+      {/* Live examples */}
+      <section className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
+        <Reveal>
+          <h2 className="font-display max-w-xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Watch a comment turn into a DM
+          </h2>
+          <p className="mt-4 max-w-md text-lg text-muted-foreground">
+            Pick a keyword below. This is an example of what happens on your account, on its own.
+          </p>
+        </Reveal>
+        <div className="mt-14 grid gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-7">
+            <Parallax from={30} to={-30}>
+              <Reveal>
+                <Bezel>
+                  <LiveDemo />
+                </Bezel>
+              </Reveal>
+            </Parallax>
+          </div>
+          <div className="lg:col-span-5">
+            <Parallax from={-30} to={30}>
+              <Reveal delay={0.1}>
+                <Bezel>
+                  <ActivityFeed />
+                </Bezel>
+              </Reveal>
+            </Parallax>
+          </div>
+        </div>
       </section>
 
       {/* How it works: numbered horizontal steps, distinct layout family */}
       <section className="border-t border-border bg-muted/40">
-        <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
           <Reveal>
-            <h2 className="max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h2 className="font-display max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
               From comment to conversation in three steps
             </h2>
           </Reveal>
@@ -123,8 +185,13 @@ export default function HomePage() {
             {STEPS.map((step, index) => (
               <Reveal key={step.title} delay={index * 0.08}>
                 <div className="flex flex-col gap-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/12 text-accent">
-                    <step.icon size={22} weight="bold" />
+                  <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-accent/12 text-accent">
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-0 rounded-full bg-accent/20 motion-safe:animate-ping"
+                      style={{ animationDelay: `${index * 0.9}s`, animationDuration: '3.2s' }}
+                    />
+                    <step.icon size={22} weight="bold" className="relative" />
                   </div>
                   <h3 className="text-lg font-semibold">{step.title}</h3>
                   <p className="text-muted-foreground">{step.body}</p>
@@ -136,75 +203,81 @@ export default function HomePage() {
       </section>
 
       {/* Feature bento: 4 cells, real visual variation on 2-3 */}
-      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+      <section className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
         <Reveal>
-          <h2 className="max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display max-w-lg text-3xl font-semibold tracking-tight sm:text-4xl">
             Built for creators, not marketing teams
           </h2>
         </Reveal>
 
         <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3 md:grid-rows-2">
           <Reveal>
-            <div className="relative flex h-full flex-col justify-between overflow-hidden rounded-[var(--radius-card)] bg-accent p-7 text-accent-foreground md:col-span-2 md:row-span-1">
+            <SpotlightCard className="flex h-full flex-col justify-between rounded-[var(--radius-card)] bg-accent p-7 text-accent-foreground md:col-span-2 md:row-span-1">
               <div
                 className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"
                 aria-hidden="true"
               />
-              <Lightning size={26} weight="fill" />
+              <Lightning size={26} weight="fill" className="float-y" />
               <div>
                 <h3 className="text-xl font-semibold">Delivered in seconds</h3>
                 <p className="mt-2 max-w-sm text-accent-foreground/90">
                   No queues, no delays. The DM sends the moment a comment matches.
                 </p>
               </div>
-            </div>
+            </SpotlightCard>
           </Reveal>
 
           <Reveal delay={0.06}>
-            <div className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-card p-7">
-              <MagicWand size={24} className="text-accent" weight="bold" />
+            <SpotlightCard className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-card p-7">
+              <MagicWand size={24} className="float-y text-accent [animation-delay:-1s]" weight="bold" />
               <div>
-                <h3 className="text-lg font-semibold">Exact, partial, or AI matching</h3>
+                <h3 className="text-lg font-semibold">Catches it however they type it</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Match a keyword exactly, or let AI understand intent.
+                  Word for word, hidden in a longer comment, or your own custom rule if you want
+                  to get specific.
                 </p>
               </div>
-            </div>
+            </SpotlightCard>
           </Reveal>
 
           <Reveal delay={0.12}>
-            <div className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-gradient-to-br from-muted to-card p-7">
-              <Robot size={24} className="text-accent" weight="bold" />
+            <SpotlightCard className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-gradient-to-br from-muted to-card p-7">
+              <ShieldCheck size={24} className="float-y text-accent [animation-delay:-2s]" weight="bold" />
               <div>
-                <h3 className="text-lg font-semibold">AI-personalized replies</h3>
+                <h3 className="text-lg font-semibold">Nobody gets double-DM&apos;d</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Opt in per automation. Off by default, your call when to use it.
+                  Every comment only gets one reply, ever, even if Instagram sends it to us twice.
                 </p>
               </div>
-            </div>
+            </SpotlightCard>
           </Reveal>
 
           <Reveal delay={0.18}>
-            <div className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-card p-7 md:col-span-2">
-              <Gift size={24} className="text-accent" weight="bold" />
+            <SpotlightCard className="flex h-full flex-col justify-between rounded-[var(--radius-card)] border border-border bg-card p-7 md:col-span-2">
+              <Gift size={24} className="float-y text-accent [animation-delay:-3s]" weight="bold" />
               <div>
-                <h3 className="text-lg font-semibold">Free to start</h3>
+                <h3 className="text-lg font-semibold">Actually free, not a trial</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  A genuinely usable free plan, with paid tiers only for higher volume.
+                  No card on file, no 14-day countdown. You only pay once you outgrow it.
                 </p>
               </div>
-            </div>
+            </SpotlightCard>
           </Reveal>
         </div>
       </section>
 
       {/* Pricing teaser: distinct layout family */}
       <section className="border-t border-border bg-muted/40">
-        <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
           <Reveal>
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-              Simple pricing, free to start
+            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              You built the audience. Replying to them shouldn&apos;t cost you.
             </h2>
+            <p className="mt-4 max-w-xl text-lg text-muted-foreground">
+              Most tools charge creators just to answer their own comments. We think that&apos;s
+              backwards, so the features that matter are free here. Every day you wait is
+              another pile of comments nobody answered.
+            </p>
           </Reveal>
 
           <div className="mt-10 grid gap-6 sm:grid-cols-2 sm:max-w-2xl">
@@ -213,16 +286,16 @@ export default function HomePage() {
                 <h3 className="text-sm font-semibold text-muted-foreground">Free</h3>
                 <p className="mt-2 text-3xl font-semibold">$0</p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Everything you need to try Convozy on a real account.
+                  Real automations on your real account. Not a trial, and no card needed.
                 </p>
               </div>
             </Reveal>
             <Reveal delay={0.08}>
               <div className="rounded-[var(--radius-card)] border border-accent bg-card p-7">
                 <h3 className="text-sm font-semibold text-accent">Pro</h3>
-                <p className="mt-2 text-3xl font-semibold">For scale</p>
+                <p className="mt-2 text-3xl font-semibold">When you&apos;re big</p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Higher volume and AI features, for creators outgrowing Free.
+                  More DMs a month and more accounts, once Free isn&apos;t enough for you.
                 </p>
               </div>
             </Reveal>
@@ -234,15 +307,34 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Final CTA: distinct layout family, centered */}
-      <section className="mx-auto max-w-7xl px-4 py-24 text-center sm:px-6">
+      {/* FAQ */}
+      <section className="mx-auto max-w-3xl px-4 py-28 sm:px-6">
         <Reveal>
-          <h2 className="mx-auto max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-            Set up your first automation in minutes
+          <h2 className="font-display text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Questions creators ask
           </h2>
-          <Button asChild size="lg" className="mt-8">
-            <Link href="/app/login">Start free</Link>
-          </Button>
+        </Reveal>
+        <div className="mt-12">
+          <Faq items={FAQS} />
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="mx-auto max-w-7xl px-4 pb-8 sm:px-6">
+        <Reveal>
+          <Lattice>
+            <div className="px-6 py-24 text-center">
+              <h2 className="font-display mx-auto max-w-xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+                Your next viral post shouldn&apos;t go unanswered
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-muted-foreground">
+                Set up your first automation in a few minutes, free.
+              </p>
+              <div className="mt-10">
+                <CtaButton href="/app/login">Start free</CtaButton>
+              </div>
+            </div>
+          </Lattice>
         </Reveal>
       </section>
     </>

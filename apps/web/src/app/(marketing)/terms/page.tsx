@@ -78,8 +78,8 @@ export default function TermsOfServicePage() {
       <h2>6. Service availability</h2>
       <p>
         We aim for high availability but don&rsquo;t guarantee uninterrupted service. Convozy also
-        depends on the Meta Graph API being available and within its own rate limits. We&rsquo;re
-        not responsible for delays or failures caused by Meta&rsquo;s platform.
+        depends on Meta being available and within its own rate limits. We&rsquo;re not
+        responsible for delays or failures caused by Meta&rsquo;s platform.
       </p>
 
       <h2>7. Termination</h2>

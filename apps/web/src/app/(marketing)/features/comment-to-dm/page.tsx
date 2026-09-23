@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
-import { ChatCircleText, Eye, PaperPlaneTilt } from '@phosphor-icons/react/dist/ssr';
+import { ChatCircleText, Eye, PaperPlaneTilt, TextAa, Code, MagnifyingGlass } from '@phosphor-icons/react/dist/ssr';
 import { Breadcrumbs } from '@/components/seo/breadcrumbs';
-import { Button } from '@/components/ui/button';
+import { CtaButton } from '@/components/marketing/cta-button';
 import { Reveal } from '@/components/marketing/reveal';
-import { HeroVisual } from '@/components/marketing/hero-visual';
+import { AutomationPreview } from '@/components/marketing/automation-preview';
+import { JsonLd } from '@/components/seo/json-ld';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 
@@ -20,24 +20,69 @@ export const metadata: Metadata = {
 const DETAILS = [
   {
     icon: ChatCircleText,
-    title: 'Pick a trigger word',
-    body: 'Tie a keyword like "PRICE" or "LINK" to a specific post, Reel, or all of your content.',
+    title: 'Pick your keyword',
+    body: 'Choose a word like "PRICE" or "LINK" for one post, one Reel, or everything you post.',
   },
   {
     icon: Eye,
     title: 'Watched in real time',
-    body: 'Every comment is checked the moment it lands, whether you posted seconds or months ago.',
+    body: 'Every comment is checked the second it arrives, even on posts from months ago.',
   },
   {
     icon: PaperPlaneTilt,
     title: 'Instant, automatic DM',
-    body: 'The commenter gets your reply, link, or an AI-personalized message, with no manual step.',
+    body: 'The commenter gets your reply or link the moment they comment, with no manual step.',
+  },
+];
+
+const MATCH_TYPES = [
+  {
+    icon: TextAa,
+    title: 'Exact word',
+    body: 'Only comments that are exactly your keyword get the DM.',
+  },
+  {
+    icon: MagnifyingGlass,
+    title: 'Anywhere in the comment',
+    body: 'Your keyword counts even inside a longer comment.',
+  },
+  {
+    icon: Code,
+    title: 'Custom',
+    body: 'Want it very specific? Make your own rule. Most creators never need it.',
+  },
+];
+
+const FAQS = [
+  {
+    question: 'Does this work on Reels as well as regular posts?',
+    answer: 'Yes. Set a keyword for one post or Reel, or keep it active across everything you post.',
+  },
+  {
+    question: 'How fast does the DM actually send?',
+    answer:
+      'Within seconds. The moment Instagram tells us about a new comment, we send your DM.',
+  },
+  {
+    question: 'Can I use more than one keyword at a time?',
+    answer: 'Yes. Run as many keywords as you like across different posts, and choose which one goes first if two match.',
   },
 ];
 
 export default function CommentToDmFeaturePage() {
+  const faqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: FAQS.map((faq) => ({
+      '@type': 'Question',
+      name: faq.question,
+      acceptedAnswer: { '@type': 'Answer', text: faq.answer },
+    })),
+  };
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+      <JsonLd data={faqJsonLd} />
       <Breadcrumbs
         baseUrl={SITE_URL}
         items={[
@@ -49,19 +94,19 @@ export default function CommentToDmFeaturePage() {
 
       <div className="mt-8 grid items-center gap-12 lg:grid-cols-2">
         <div>
-          <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          <h1 className="font-display text-4xl font-semibold tracking-tight sm:text-5xl">
             Comment-to-DM automation for Instagram
           </h1>
           <p className="mt-5 max-w-md text-lg text-muted-foreground">
-            When someone comments your chosen keyword, Convozy instantly sends them a DM: a link,
-            a reply, or an AI-personalized message.
+            When someone comments your chosen keyword, Convozy instantly sends them a DM: a link
+            or a reply you write once.
           </p>
-          <Button asChild size="lg" className="mt-8">
-            <Link href="/app/login">Start free</Link>
-          </Button>
+          <div className="mt-8">
+            <CtaButton href="/app/login">Start free</CtaButton>
+          </div>
         </div>
 
-        <HeroVisual />
+        <AutomationPreview />
       </div>
 
       <div className="mt-24 grid gap-10 border-t border-border pt-16 md:grid-cols-3 md:gap-8">
@@ -76,6 +121,35 @@ export default function CommentToDmFeaturePage() {
             </div>
           </Reveal>
         ))}
+      </div>
+
+      <div className="mt-24 border-t border-border pt-16">
+        <h2 className="font-display text-2xl font-semibold tracking-tight">Three ways to catch a comment</h2>
+        <div className="mt-10 grid gap-6 sm:grid-cols-3">
+          {MATCH_TYPES.map((match, index) => (
+            <Reveal key={match.title} delay={index * 0.06}>
+              <div className="flex h-full flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-card p-6">
+                <match.icon size={22} className="text-accent" weight="bold" />
+                <h3 className="font-semibold">{match.title}</h3>
+                <p className="text-sm text-muted-foreground">{match.body}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-24 border-t border-border pt-16">
+        <h2 className="font-display text-2xl font-semibold tracking-tight">Common questions</h2>
+        <div className="mt-8 grid gap-8 sm:grid-cols-3">
+          {FAQS.map((faq, index) => (
+            <Reveal key={faq.question} delay={index * 0.06}>
+              <div>
+                <h3 className="font-semibold">{faq.question}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{faq.answer}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </div>
   );

@@ -43,7 +43,7 @@ export default function DataDeletionPage() {
         <li>
           <strong>Disconnect an Instagram account:</strong> from your Convozy dashboard, go to
           Settings → Connected Accounts and disconnect it. This immediately stops Convozy from
-          making any further Graph API calls on your behalf and revokes our stored access token
+          making any further calls to Meta on your behalf and revokes our stored access token
           for that account.
         </li>
         <li>

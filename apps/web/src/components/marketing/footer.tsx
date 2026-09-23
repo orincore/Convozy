@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Logo } from './logo';
+import { WordmarkGlow } from './wordmark-glow';
 
 const COLUMNS = [
   {
@@ -21,8 +22,8 @@ const COLUMNS = [
 
 export function MarketingFooter() {
   return (
-    <footer className="border-t border-border">
-      <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6">
+    <footer className="border-t border-border pt-24">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="grid gap-10 md:grid-cols-[1.2fr_1fr_1fr]">
           <div className="flex flex-col gap-3">
             <Logo />
@@ -56,6 +57,9 @@ export function MarketingFooter() {
             support@orincore.com
           </a>
         </div>
+      </div>
+      <div className="mx-auto mt-10 max-w-7xl px-4 pb-6 sm:px-6">
+        <WordmarkGlow word="Convozy" />
       </div>
     </footer>
   );

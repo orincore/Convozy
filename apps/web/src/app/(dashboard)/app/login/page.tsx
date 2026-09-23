@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CircleNotch, WarningCircle } from '@phosphor-icons/react';
@@ -61,9 +62,7 @@ export default function LoginPage() {
     <div className="flex min-h-[100dvh] items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2 text-foreground">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-            <span className="text-sm font-bold">C</span>
-          </div>
+          <Image src="/brand/logo-white.png" alt="" width={28} height={27} className="h-7 w-auto" />
           <span className="text-lg font-semibold tracking-tight">Convozy</span>
         </Link>
 

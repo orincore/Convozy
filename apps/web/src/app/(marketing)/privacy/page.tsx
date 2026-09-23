@@ -69,7 +69,7 @@ export default function PrivacyPolicyPage() {
 
       <h2>3. How we use it</h2>
       <ul>
-        <li>To operate the comment-to-DM automation you configure: matching keywords and sending the reply you set up, via the Instagram Graph API.</li>
+        <li>To operate the comment-to-DM automation you configure: matching keywords and sending the reply you set up, via Meta.</li>
         <li>To show you delivery status and basic analytics for your own automations.</li>
         <li>To enforce plan limits (e.g. free-tier monthly send caps) and process billing.</li>
         <li>
@@ -92,13 +92,13 @@ export default function PrivacyPolicyPage() {
       <p>
         You can request access to, correction of, or deletion of your data by contacting us at{' '}
         <a href="mailto:privacy@orincore.com">privacy@orincore.com</a>. Disconnecting an Instagram
-        account from Convozy immediately stops us from making further Graph API calls on your
+        account from Convozy immediately stops us from making further calls to Meta on your
         behalf and revokes our use of the associated access token.
       </p>
 
       <h2>6. Third-party services</h2>
       <p>
-        Convozy relies on the Meta Graph API (Instagram), Stripe and Razorpay (payments), and,
+        Convozy relies on Meta (Instagram), Stripe and Razorpay (payments), and,
         only for opted-in AI features, a third-party AI provider. Each of these processes data
         under their own privacy policy in addition to this one.
       </p>

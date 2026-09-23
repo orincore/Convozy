@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -86,9 +87,7 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
     <div className="flex h-full flex-col gap-6 overflow-y-auto px-3 py-5">
       <div className="flex items-center justify-between px-2">
         <Link href="/app" className="flex items-center gap-2 text-foreground" onClick={onNavigate}>
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-            <span className="text-sm font-bold">C</span>
-          </div>
+          <Image src="/brand/logo-white.png" alt="" width={28} height={27} className="h-7 w-auto" />
           <span className="text-base font-semibold tracking-tight">Convozy</span>
         </Link>
         {onNavigate && (

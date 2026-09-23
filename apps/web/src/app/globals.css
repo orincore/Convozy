@@ -4,6 +4,11 @@
 @theme {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+  /* Display face for marketing headlines only (set via .font-display,
+     scoped to the marketing route group's layout) - tighter, more
+     confident grotesk than body Geist. Falls back to Geist Sans wherever
+     the marketing font variable isn't in scope (e.g. dashboard). */
+  --font-display: var(--font-space-grotesk), var(--font-geist-sans), ui-sans-serif, sans-serif;
 
   /* Locked dark, monochrome theme (user directive: "complete black and
      white theme, dark theme") - no color accent. Primary actions use an
@@ -52,4 +57,65 @@ body {
 ::selection {
   background: var(--color-accent);
   color: var(--color-accent-foreground);
+}
+
+/* Fixed marketing-page backdrop: faint grid + soft glow blobs, cursor.com-
+   register dark dev-tool aesthetic. Applied once at the marketing layout
+   root (pointer-events-none, fixed) - never per-section, per taste-skill
+   6.E (no repaint cost on scrolling containers) and 4.11 (one theme,
+   applied once, not re-declared per section). */
+.marketing-backdrop {
+  background-image:
+    linear-gradient(to right, rgba(250, 250, 250, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(250, 250, 250, 0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 55% at 50% 0%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 55% at 50% 0%, black 40%, transparent 100%);
+}
+
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
+.ring-spin {
+  animation: ring-spin 24s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring-spin { animation: none; }
+}
+
+@keyframes dust {
+  0% { transform: translate3d(0, 0, 0); opacity: 0; }
+  20% { opacity: 0.55; }
+  80% { opacity: 0.35; }
+  100% { transform: translate3d(var(--dx), -140px, 0); opacity: 0; }
+}
+.dust {
+  animation: dust 20s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.text-shimmer {
+  background-image: linear-gradient(100deg, #fafafa 35%, #71717a 50%, #fafafa 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.float-y { animation: float-y 4.5s ease-in-out infinite; }
+@keyframes cta-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(250, 250, 250, 0); }
+  50% { box-shadow: 0 0 34px 2px rgba(250, 250, 250, 0.28); }
+}
+.cta-glow { animation: cta-glow 3.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .text-shimmer { animation: none; color: inherit; background: none; }
+  .float-y, .cta-glow { animation: none; }
 }
