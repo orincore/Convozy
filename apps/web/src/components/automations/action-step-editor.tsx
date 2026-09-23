@@ -35,7 +35,7 @@ import {
 } from '@/lib/api';
 
 const ACCEPTED_MEDIA_TYPES =
-  'image/png,image/jpeg,image/gif,video/mp4,video/ogg,video/webm,video/quicktime,video/x-msvideo,audio/aac,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,application/pdf';
+  'image/png,image/jpeg,image/gif,video/mp4,video/ogg,video/webm,video/quicktime,video/x-msvideo,audio/aac,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,audio/mpeg,application/pdf';
 
 const MEDIA_ICON: Record<MediaKind, typeof ImageIcon> = {
   image: ImageIcon,
