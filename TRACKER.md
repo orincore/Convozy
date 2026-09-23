@@ -1123,8 +1123,20 @@ verified locally, pending VPS deploy (user directive, 2026-09-23).**
   and reached the follow-check step (only failing there because the local
   test fixture's token is a deliberate dummy value, the same expected
   failure mode already established for the RATE_LIMITED fix's live tests).
-- 182/182 backend tests, clean `tsc`/lint on both apps.
-- Not yet deployed to the VPS.
+- 189/189 backend tests, clean `tsc`/lint on both apps.
+- Deployed via `infra/scripts/deploy.sh` in two passes: `a610931` →
+  `67ecaa4` (the feature itself, no migration — nothing in this
+  milestone touched Prisma schema), then `67ecaa4` → `212c0a8` (a real
+  gap found immediately after the first deploy: `subscribeToWebhooks`
+  only ever ran once, at connect time, so any account connected before
+  today — including the real `@orincore.official` account — was never
+  actually subscribed to `messaging_postbacks` and would never receive
+  button taps. Fixed by also re-subscribing inside `syncProfile`, the
+  already-shipped on-demand "Refresh profile" action. **Action needed
+  from the user**: click "Refresh profile" once on each existing
+  connected account (Accounts page) so it picks up the new webhook
+  field — new connects/reconnects get it automatically.
+- Both health checks clean post-deploy; worker logs confirm no errors.
 
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
