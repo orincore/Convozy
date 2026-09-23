@@ -43,7 +43,7 @@ export default function TermsOfServicePage() {
       <h2>1. Acceptance</h2>
       <p>
         By creating an account or connecting an Instagram Business Account to Convozy
-        (convozy.orincore.com, a product of Orincore), you agree to these terms.
+        (convozy.orincore.com, a product of Orincore, <a href="https://www.orincore.com">www.orincore.com</a>), you agree to these terms.
       </p>
 
       <h2>2. The service</h2>

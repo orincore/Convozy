@@ -45,7 +45,7 @@ export default function PrivacyPolicyPage() {
     >
       <h2>1. Who we are</h2>
       <p>
-        Convozy (&ldquo;Convozy&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) is a product of Orincore,
+        Convozy (&ldquo;Convozy&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) is a product of Orincore (<a href="https://www.orincore.com">www.orincore.com</a>),
         available at convozy.orincore.com. Convozy helps Instagram creators automatically reply to
         comments and send direct messages when a viewer comments a chosen keyword on a post or
         Reel.

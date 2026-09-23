@@ -29,7 +29,8 @@ export function MarketingFooter() {
           <div className="flex flex-col gap-3">
             <Logo />
             <p className="max-w-xs text-sm text-muted-foreground">
-              Automate Instagram comment replies and DMs. Built by Orincore.
+              Automate Instagram comment replies and DMs. Built by Orincore,{' '}
+              <a href="https://www.orincore.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 transition-colors hover:text-foreground">www.orincore.com</a>.
             </p>
           </div>
 
@@ -53,7 +54,10 @@ export function MarketingFooter() {
         </div>
 
         <div className="mt-12 flex flex-col gap-4 border-t border-border pt-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <p>© {new Date().getFullYear()} Orincore. All rights reserved.</p>
+          <p>
+            © {new Date().getFullYear()} Orincore,{' '}
+            <a href="https://www.orincore.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 transition-colors hover:text-foreground">www.orincore.com</a>. All rights reserved.
+          </p>
           <a href="mailto:support@orincore.com" className="hover:text-foreground">
             support@orincore.com
           </a>

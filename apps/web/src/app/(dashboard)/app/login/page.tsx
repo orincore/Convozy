@@ -60,7 +60,10 @@ export default function LoginPage() {
           </ul>
         </div>
 
-        <p className="text-sm text-muted-foreground">A product of Orincore</p>
+        <p className="text-sm text-muted-foreground">
+          A product of Orincore,{' '}
+          <a href="https://www.orincore.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 transition-colors hover:text-foreground">www.orincore.com</a>
+        </p>
       </div>
 
       {/* sign-in card */}
