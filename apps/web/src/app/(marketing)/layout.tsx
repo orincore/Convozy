@@ -56,8 +56,8 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     <div className={`${spaceGrotesk.variable} relative`}>
       <JsonLd data={organizationJsonLd} />
       <MarketingBackdrop />
-      <ScrollBlur />
       <div className="relative z-10">
+        <ScrollBlur />
         <MarketingNav />
         <main className="pt-20">{children}</main>
         <MarketingFooter />
