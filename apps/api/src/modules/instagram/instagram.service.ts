@@ -521,6 +521,13 @@ export class InstagramService {
    * live. Called at connect time (handleCallback), opportunistically after
    * a token refresh, and on-demand via the dashboard's "Refresh profile"
    * action (InstagramController) — never automatically on every page load.
+   *
+   * Also re-subscribes the account to the current webhook field list. This
+   * matters in practice: `subscribeToWebhooks` normally only runs once, at
+   * connect time, so any account connected before a new webhook field was
+   * added (e.g. messaging_postbacks for interactive DM buttons, shipped
+   * 2026-09-23) would never receive that field's events until reconnected.
+   * Subscribing is idempotent on Meta's side, so it's safe to repeat here.
    */
   async syncProfile(accountId: string): Promise<ConnectedAccountSummary> {
     const credentials = await this.getSendCredentials(accountId);
@@ -532,6 +539,10 @@ export class InstagramService {
     }
 
     const profile = await this.fetchProfile(credentials.accessToken);
+
+    await this.subscribeToWebhooks(credentials.igBusinessId, credentials.accessToken).catch((err) => {
+      this.logger.warn(`Webhook re-subscription failed for account ${accountId}: ${(err as Error).message}`);
+    });
 
     return this.prisma.instagramAccount.update({
       where: { id: accountId },

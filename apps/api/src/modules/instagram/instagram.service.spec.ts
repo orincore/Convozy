@@ -584,6 +584,59 @@ describe('InstagramService', () => {
       );
     });
 
+    it('also re-subscribes the account to the current webhook field list (idempotent, non-fatal)', async () => {
+      // Regression coverage for a real gap found deploying interactive DM
+      // buttons: subscribeToWebhooks only ever ran once, at connect time,
+      // so an account connected before messaging_postbacks was added would
+      // never receive postback events until reconnected. syncProfile is the
+      // existing on-demand "Refresh profile" action, so it's a natural,
+      // already-exposed place to also repeat the (idempotent) subscription.
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}), text: async () => '' }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+      await service.syncProfile('acc-1');
+
+      const subscribeCall = (global.fetch as jest.Mock).mock.calls.find((call) =>
+        (call[0] as string).includes('subscribed_apps'),
+      );
+      expect(subscribeCall).toBeDefined();
+      expect(subscribeCall![0]).toContain('ig-biz-1/subscribed_apps');
+      expect(decodeURIComponent(subscribeCall![0] as string)).toContain('subscribed_fields=comments,live_comments,messages,messaging_postbacks');
+    });
+
+    it('does not fail the profile sync when webhook re-subscription itself fails', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+          update: jest.fn().mockResolvedValue({ id: 'acc-1' }),
+        },
+      } as any;
+      let call = 0;
+      global.fetch = jest.fn().mockImplementation(() => {
+        call += 1;
+        if (call === 1) {
+          return Promise.resolve({ ok: true, json: async () => ({ name: 'Orincore' }) });
+        }
+        return Promise.reject(new Error('network down'));
+      }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      await expect(service.syncProfile('acc-1')).resolves.toEqual({ id: 'acc-1' });
+    });
+
     it('throws instead of pinging Meta when the account has no usable credentials', async () => {
       const prisma = {
         instagramAccount: {
