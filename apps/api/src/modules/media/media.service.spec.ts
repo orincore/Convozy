@@ -111,6 +111,19 @@ describe('MediaService.uploadFile', () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
+  it('accepts audio/mpeg (mp3) as a voice-note-capable audio upload', async () => {
+    const service = new MediaService(makeConfigService());
+
+    const result = await service.uploadFile(
+      'workspace-1',
+      makeFile({ mimetype: 'audio/mpeg', originalname: 'voice-note.mp3', size: 2 * 1024 * 1024 }),
+    );
+
+    const putInput = sendMock.mock.calls[0][0];
+    expect(putInput.Key).toMatch(/^workspaces\/workspace-1\/audio\/[0-9a-f-]+\.mp3$/);
+    expect(result.type).toBe('audio');
+  });
+
   it('allows a video up to its own larger 25MB cap', async () => {
     const service = new MediaService(makeConfigService());
 

@@ -20,6 +20,19 @@ interface MediaTypeSpec {
 // Keyed by MIME type. Deliberately only the formats Meta documents as
 // supported — anything else is rejected at upload time rather than
 // accepted and failing later at send time.
+//
+// Voice notes: Instagram's Send API has no distinct "voice message" type
+// like WhatsApp's Cloud API does (audio.voice: true, OGG/OPUS-only) —
+// confirmed against Meta's current Instagram messaging docs, which only
+// document a generic `type: "audio"` attachment. Any audio file sent this
+// way already renders as a playable audio bubble in the DM thread, so a
+// creator's m4a/mp3/wav recording already *is* the closest thing Instagram
+// has to a voice note; there's no separate flag or endpoint to opt into.
+// audio/mpeg (mp3) is included here per an explicit user request even
+// though Meta's own audio-format table only lists aac/m4a/wav/mp4 — mp3 is
+// NOT documented as supported for Instagram (only for WhatsApp). Treated
+// like the private-reply-attachment combination elsewhere in this file:
+// shipped as best-effort, watch MessageLog for a Graph API rejection.
 const SUPPORTED_MIME_TYPES: Record<string, MediaTypeSpec> = {
   'image/png': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'png' },
   'image/jpeg': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'jpg' },
@@ -34,6 +47,7 @@ const SUPPORTED_MIME_TYPES: Record<string, MediaTypeSpec> = {
   'audio/x-m4a': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a' },
   'audio/wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav' },
   'audio/x-wav': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'wav' },
+  'audio/mpeg': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'mp3' },
   'application/pdf': { kind: 'file', maxBytes: 25 * 1024 * 1024, extension: 'pdf' },
 };
 
