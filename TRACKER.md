@@ -1178,8 +1178,11 @@ notes, and other things" — DM messages were text/link-only.**
   correctly hidden/shown alongside the text and buttons sections, and the
   persisted payload shape confirmed directly in Postgres.
 - 201/201 backend tests, clean `tsc`/lint on both apps.
-- Not yet deployed to the VPS — the R2 credentials still need adding to the
-  VPS `.env` (not git-tracked) before this deploy.
+- Deployed via `infra/scripts/deploy.sh` (`212c0a8` → `664ad61`), R2
+  credentials added to the VPS `.env` first (backed up before editing).
+  Verified live in production, not just health-checked: a real upload
+  through the live API, confirmed publicly reachable over HTTPS at its
+  R2 URL.
 
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
