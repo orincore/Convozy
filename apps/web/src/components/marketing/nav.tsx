@@ -30,7 +30,7 @@ export function MarketingNav() {
       <header className="fixed inset-x-0 top-[max(1rem,env(safe-area-inset-top))] z-40 flex justify-center px-4">
         <nav
           aria-label="Main"
-          className="flex w-full max-w-3xl items-center justify-between rounded-full border border-white/10 bg-background/60 py-2 pl-5 pr-2 shadow-[inset_0_1px_1px_rgba(255,255,255,0.06)] backdrop-blur-xl"
+          className="flex w-full max-w-3xl items-center justify-between rounded-full border border-white/10 bg-background/90 py-2 pl-5 pr-2 shadow-[inset_0_1px_1px_rgba(255,255,255,0.06)] [@media(hover:hover)]:bg-background/60 [@media(hover:hover)]:backdrop-blur-xl"
         >
           <Logo />
 

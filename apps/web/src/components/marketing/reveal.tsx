@@ -9,8 +9,8 @@ export function Reveal({ children, delay = 0, className }: { children: ReactNode
   return (
     <motion.div
       className={className}
-      initial={reduce ? false : { opacity: 0, y: 32, filter: 'blur(10px)' }}
-      whileInView={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      initial={reduce ? false : { opacity: 0, y: 32 }}
+      whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.25 }}
       transition={{ duration: 0.9, delay, ease: [0.32, 0.72, 0, 1] }}
     >

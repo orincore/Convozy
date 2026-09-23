@@ -78,8 +78,8 @@ export function LegalArticle({
       {breadcrumb}
 
       <motion.header
-        initial={reduce ? false : { opacity: 0, y: 28, filter: 'blur(10px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        initial={reduce ? false : { opacity: 0, y: 28 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.9, ease: EASE }}
         className="mt-10 grid gap-8 lg:grid-cols-12 lg:items-end"
       >

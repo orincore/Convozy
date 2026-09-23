@@ -10,6 +10,9 @@ import { ScrollBlur } from '@/components/marketing/scroll-blur';
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  // Stops iOS Safari from zooming the page out to fit anything that sticks out sideways,
+  // which resizes every fixed element (the navbar) and looks like the screen flickering.
+  minimumScale: 1,
   viewportFit: 'cover',
   themeColor: '#0a0a0b',
 };
@@ -53,7 +56,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className={`${spaceGrotesk.variable} relative`}>
+    <div className={`${spaceGrotesk.variable} relative overflow-x-clip`}>
       <JsonLd data={organizationJsonLd} />
       <MarketingBackdrop />
       <div className="relative z-10">

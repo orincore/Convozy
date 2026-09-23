@@ -37,8 +37,8 @@ export default function LoginPage() {
 
         <div>
           <motion.h1
-            initial={reduce ? false : { opacity: 0, y: 28, filter: 'blur(10px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            initial={reduce ? false : { opacity: 0, y: 28 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, ease: EASE }}
             className="font-display max-w-md text-5xl font-semibold leading-[1.05] tracking-tight text-balance"
           >
@@ -76,7 +76,7 @@ export default function LoginPage() {
 
           <motion.div
             initial={reduce ? false : { opacity: 0, y: 24, filter: 'blur(8px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: EASE }}
             className="rounded-[2rem] border border-white/10 bg-white/[0.03] p-1.5"
           >

@@ -68,8 +68,8 @@ export function PlanCards() {
     <div className="grid items-stretch gap-5 lg:grid-cols-5">
       <motion.div
         className="lg:col-span-3"
-        initial={{ opacity: 0, y: 32, filter: 'blur(10px)' }}
-        whileInView={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        initial={{ opacity: 0, y: 32 }}
+        whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.9, ease: EASE }}
       >
@@ -96,8 +96,8 @@ export function PlanCards() {
 
       <motion.div
         className="lg:col-span-2"
-        initial={{ opacity: 0, y: 32, filter: 'blur(10px)' }}
-        whileInView={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        initial={{ opacity: 0, y: 32 }}
+        whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.2 }}
         transition={{ duration: 0.9, delay: 0.12, ease: EASE }}
       >
@@ -236,8 +236,8 @@ export function Section({ title, sub, children }: { title: string; sub?: string;
   return (
     <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
       <motion.div
-        initial={{ opacity: 0, y: 28, filter: 'blur(10px)' }}
-        whileInView={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        initial={{ opacity: 0, y: 28 }}
+        whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.4 }}
         transition={{ duration: 0.9, ease: EASE }}
       >
