@@ -1138,6 +1138,49 @@ verified locally, pending VPS deploy (user directive, 2026-09-23).**
   field — new connects/reconnects get it automatically.
 - Both health checks clean post-deploy; worker logs confirm no errors.
 
+**Follow-up, same day (user, 2026-09-23): "allow sending media files, voice
+notes, and other things" — DM messages were text/link-only.**
+- Verified against Meta's Instagram-Login Send Messages doc: `message
+  .attachment` supports `type: image|video|audio|file` with `payload.url` —
+  same `/messages` endpoint already in use, no new permissions. "Voice
+  notes" map to the `audio` type (Meta documents no separate voice-note
+  attachment type). A message is one of: text, a Button Template, or a
+  media attachment — never combined in one Graph API call, so media and
+  buttons are mutually exclusive on the same action (enforced at write
+  time, not just in the UI).
+- **Storage, confirmed with the user before building**: Cloudflare R2
+  (S3-compatible), not local VPS disk — avoids any Nginx/Docker-volume
+  changes. Objects live under `workspaces/<workspaceId>/<type>/<uuid>.<ext>`
+  on the user's own `convozy` bucket (custom domain
+  `convozy.media.orincore.com`, public access enabled — required, since
+  Meta's servers fetch the URL directly to deliver the message).
+- Backend: new `media` module (`MediaService`/`MediaController`,
+  `POST /media/upload`, multipart via multer + `@aws-sdk/client-s3`).
+  Validates against Meta's own real per-type caps at upload time (image
+  8MB; video/audio/file 25MB) and only Meta-documented formats (PNG/JPEG/
+  GIF, MP4/OGG/WEBM/MOV/AVI, AAC/M4A/WAV, PDF) — rejected immediately with
+  a clear message rather than accepted and failing later at send time. New
+  `R2_*` env vars (optional at the schema level, like Stripe/Razorpay/AI —
+  upload just becomes unavailable, not a boot failure, if unset).
+  `ActionPayloadDto` gains `media` (mutually exclusive with `buttons`,
+  makes `text` optional — Meta's raw attachment send has no caption field).
+  `MessagingService.buildMessageBody` sends the attachment shape when
+  `media` is set. 12 new backend tests (media service upload/validation,
+  send-time body shape, write-time mutual-exclusivity/SEND_DM-only checks).
+- Frontend: SEND_DM steps get an "Attach a file" control (hidden once
+  buttons exist, and vice versa) — upload progress, inline error, and a
+  preview card (icon by type, filename, size) once attached, with a plain
+  remove action.
+- Verified end-to-end against the **real** R2 bucket (not mocked) — a real
+  file uploaded through the real local API, confirmed reachable over HTTPS
+  at its public URL (what Meta's servers would fetch), the automation
+  created and edited through the real builder UI with the attachment
+  correctly hidden/shown alongside the text and buttons sections, and the
+  persisted payload shape confirmed directly in Postgres.
+- 201/201 backend tests, clean `tsc`/lint on both apps.
+- Not yet deployed to the VPS — the R2 credentials still need adding to the
+  VPS `.env` (not git-tracked) before this deploy.
+
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
 the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/

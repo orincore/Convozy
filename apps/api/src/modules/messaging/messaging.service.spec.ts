@@ -210,6 +210,28 @@ describe('MessagingService.send', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('sends a media attachment (image/video/audio/file) as message.attachment, not a text message', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
+        actionType: ActionType.SEND_DM,
+        content: { media: { type: 'image', url: 'https://convozy.media.orincore.com/workspaces/w1/image/x.png' } },
+      }),
+    );
+
+    const call = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.message).toEqual({
+      attachment: { type: 'image', payload: { url: 'https://convozy.media.orincore.com/workspaces/w1/image/x.png' } },
+    });
+  });
+
   it('sends a real Button Template message for a WEB_URL button, not a flattened plain-text fallback', async () => {
     const { service } = makeService();
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;

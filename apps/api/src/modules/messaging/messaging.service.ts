@@ -16,9 +16,15 @@ interface ActionContentButton {
   payload?: string;
 }
 
+interface ActionContentMedia {
+  type: 'image' | 'video' | 'audio' | 'file';
+  url: string;
+}
+
 interface ActionContent {
-  text: string;
+  text?: string;
   buttons?: ActionContentButton[];
+  media?: ActionContentMedia;
 }
 
 class GraphApiError extends Error {
@@ -197,23 +203,36 @@ export class MessagingService {
    * resolves in AutomationsService.resolvePostback).
    */
   private buildMessageBody(content: ActionContent): object {
-    if (!content.buttons?.length) {
-      return { text: content.text };
+    // Mutually exclusive per Meta's Send API — a media attachment, a
+    // Button Template attachment, and a plain text message are three
+    // different message shapes, never combined in one call (enforced at
+    // write time in AutomationsService.validateActionTree; media wins here
+    // only as a defensive ordering, since the two are never both set).
+    if (content.media) {
+      // Image/video/audio/file — same message.attachment shape as the
+      // Button Template above, just a simpler payload (a bare url, no
+      // template wrapper). Confirmed against Meta's Instagram-Login Send
+      // Messages doc: type is the media kind itself (image/video/audio/
+      // file), payload.url is the file's URL.
+      return { attachment: { type: content.media.type, payload: { url: content.media.url } } };
     }
-    return {
-      attachment: {
-        type: 'template',
-        payload: {
-          template_type: 'button',
-          text: content.text,
-          buttons: content.buttons.map((b) =>
-            b.type === 'POSTBACK'
-              ? { type: 'postback', title: b.title, payload: b.payload }
-              : { type: 'web_url', title: b.title, url: b.url },
-          ),
+    if (content.buttons?.length) {
+      return {
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'button',
+            text: content.text,
+            buttons: content.buttons.map((b) =>
+              b.type === 'POSTBACK'
+                ? { type: 'postback', title: b.title, payload: b.payload }
+                : { type: 'web_url', title: b.title, url: b.url },
+            ),
+          },
         },
-      },
-    };
+      };
+    }
+    return { text: content.text };
   }
 
   private async postGraphApi(path: string, body: unknown, accessToken: string, version: string): Promise<unknown> {

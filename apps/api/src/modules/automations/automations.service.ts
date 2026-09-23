@@ -327,6 +327,20 @@ export class AutomationsService {
     }
     for (const action of actions) {
       if (action.type !== ActionType.CONDITION) {
+        if (action.payload?.media) {
+          if (action.type !== ActionType.SEND_DM) {
+            throw new AppException(
+              'INVALID_ACTION',
+              'Media attachments are only supported on "Send a DM" steps — public comment replies and comment moderation can\'t carry one.',
+            );
+          }
+          if (action.payload.buttons?.length) {
+            throw new AppException(
+              'INVALID_ACTION',
+              'A message can have buttons or a media attachment, not both — Meta sends these as different message types.',
+            );
+          }
+        }
         continue;
       }
       if (!action.condition || !action.children) {
@@ -582,10 +596,14 @@ export class AutomationsService {
             recipientId: isConversationSourced ? commentEvent.fromUsername : commentEvent.externalEventId,
             recipientType: isConversationSourced ? 'user' : 'comment',
             actionType: action.type,
-            content: {
-              text: this.renderText((action.payload as unknown as ActionPayloadDto).text, commentEvent),
-              buttons: (action.payload as unknown as ActionPayloadDto).buttons,
-            },
+            content: (() => {
+              const payload = action.payload as unknown as ActionPayloadDto;
+              return {
+                text: payload.text ? this.renderText(payload.text, commentEvent) : undefined,
+                buttons: payload.buttons,
+                media: payload.media,
+              };
+            })(),
             commentEventId: commentEvent.id,
           };
     await this.messageSendQueue.add('send', jobData, { delay, jobId });

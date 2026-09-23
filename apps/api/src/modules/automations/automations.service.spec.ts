@@ -491,6 +491,35 @@ describe('AutomationsService.matchCommentEvent', () => {
     expect(messageSendQueue.add).not.toHaveBeenCalled();
   });
 
+  it('dispatches a SEND_DM action carrying a media attachment through to the send job', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent());
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.SEND_DM,
+            order: 0,
+            delaySeconds: 0,
+            payload: { media: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' } },
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: expect.objectContaining({ media: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' } }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('dispatches a HIDE_COMMENT action with the comment id and no payload text', async () => {
     const { service, prisma, messageSendQueue } = makeService();
     prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ externalEventId: 'ig-comment-42' }));
@@ -585,6 +614,57 @@ describe('AutomationsService CRUD ownership', () => {
         actions: [{ type: ActionType.SEND_DM, payload: { text: 'hi' } }],
       } as any),
     ).rejects.toThrow(AppException);
+  });
+
+  it('create() rejects a media attachment on a non-SEND_DM action (e.g. REPLY_COMMENT)', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create('workspace-1', {
+        name: 'x',
+        instagramAccountId: 'ig-account-1',
+        triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+        actions: [
+          { type: ActionType.REPLY_COMMENT, payload: { text: 'hi', media: { type: 'image', url: 'https://x/y.png' } } },
+        ],
+      } as any),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('create() rejects a media attachment combined with buttons on the same SEND_DM action', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create('workspace-1', {
+        name: 'x',
+        instagramAccountId: 'ig-account-1',
+        triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+        actions: [
+          {
+            type: ActionType.SEND_DM,
+            payload: {
+              media: { type: 'image', url: 'https://x/y.png' },
+              buttons: [{ title: 'Go', type: 'WEB_URL', url: 'https://x' }],
+            },
+          },
+        ],
+      } as any),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('create() allows a media-only SEND_DM action with no text', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue({ id: 'automation-1' });
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await expect(
+      service.create('workspace-1', {
+        name: 'x',
+        instagramAccountId: 'ig-account-1',
+        triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+        actions: [{ type: ActionType.SEND_DM, payload: { media: { type: 'image', url: 'https://x/y.png' } } }],
+      } as any),
+    ).resolves.toBeDefined();
   });
 
   it('findOne() 404s (not leaks) when the automation belongs to a different workspace', async () => {

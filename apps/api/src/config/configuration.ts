@@ -53,6 +53,13 @@ export interface AppConfig {
     apiKey?: string;
     baseUrl?: string;
   };
+  r2: {
+    accountId?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    bucketName?: string;
+    publicUrlBase?: string;
+  };
   queues: {
     webhookConcurrency: number;
     messageSendConcurrency: number;
@@ -110,6 +117,13 @@ export default function configuration(): AppConfig {
     ai: {
       apiKey: env.AI_PROVIDER_API_KEY,
       baseUrl: env.AI_PROVIDER_BASE_URL,
+    },
+    r2: {
+      accountId: env.R2_ACCOUNT_ID,
+      accessKeyId: env.R2_ACCESS_KEY_ID,
+      secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      bucketName: env.R2_BUCKET_NAME,
+      publicUrlBase: env.R2_PUBLIC_URL_BASE,
     },
     queues: {
       webhookConcurrency: env.QUEUE_CONCURRENCY_WEBHOOK,

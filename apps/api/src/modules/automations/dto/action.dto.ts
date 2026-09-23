@@ -58,11 +58,32 @@ export class ActionButtonDto {
   lockedText?: string;
 }
 
-export class ActionPayloadDto {
-  // Supports the `{{username}}` placeholder, substituted with the
-  // commenter's IG username at send time — see AutomationsService.renderText.
+// A single media attachment on a SEND_DM message (image/GIF, video, audio,
+// or a PDF file) — Meta's Send API sends this as its own message, separate
+// from a text message or a Button Template (message.attachment.type set to
+// this same string). `url` is always Convozy's own R2-hosted URL (see the
+// media module's upload endpoint), never an arbitrary client-supplied URL —
+// DTO-level validation only checks it's a well-formed URL string; the real
+// trust boundary is that the dashboard only ever offers URLs it just
+// uploaded itself.
+export class ActionMediaDto {
+  @IsIn(['image', 'video', 'audio', 'file'])
+  type!: 'image' | 'video' | 'audio' | 'file';
+
   @IsString()
-  text!: string;
+  @MinLength(1)
+  url!: string;
+}
+
+export class ActionPayloadDto {
+  // Required unless `media` is set — Meta's raw attachment send (image/
+  // video/audio/file) carries no caption/text field of its own, so a
+  // media-only message has none either. A Button Template still needs
+  // `text` (it's the prompt shown above the buttons).
+  @ValidateIf((o: ActionPayloadDto) => !o.media)
+  @IsString()
+  @MinLength(1)
+  text?: string;
 
   // Meta's Button Template caps a message at 3 buttons.
   @IsOptional()
@@ -71,6 +92,16 @@ export class ActionPayloadDto {
   @ValidateNested({ each: true })
   @Type(() => ActionButtonDto)
   buttons?: ActionButtonDto[];
+
+  // Mutually exclusive with `buttons` — Meta's Send API takes either a
+  // Button Template attachment or a plain media attachment per message, not
+  // both (checked in AutomationsService, not here — a cross-field check
+  // like this reads more clearly as a service-level guard than a
+  // class-validator custom decorator for one call site).
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ActionMediaDto)
+  media?: ActionMediaDto;
 }
 
 // The THEN/ELSE branches of a CONDITION action. Recursive: each branch is

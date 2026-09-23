@@ -18,6 +18,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { AutomationsModule } from './modules/automations/automations.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { MediaModule } from './modules/media/media.module';
 
 /**
  * Root module for the API (HTTP) entrypoint (main.ts). See worker.module.ts
@@ -43,6 +44,7 @@ import { ContactsModule } from './modules/contacts/contacts.module';
     AutomationsModule,
     ActivityModule,
     ContactsModule,
+    MediaModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

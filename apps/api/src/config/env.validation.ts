@@ -69,6 +69,15 @@ export const envSchema = z.object({
   AI_PROVIDER_API_KEY: optional(z.string()),
   AI_PROVIDER_BASE_URL: optional(z.string().url()),
 
+  // Cloudflare R2 (S3-compatible) — media uploads for DM attachments (see
+  // media module). Optional: media upload is unavailable, not a boot
+  // failure, when unset (matches Stripe/Razorpay/AI's own optional pattern).
+  R2_ACCOUNT_ID: optional(z.string()),
+  R2_ACCESS_KEY_ID: optional(z.string()),
+  R2_SECRET_ACCESS_KEY: optional(z.string()),
+  R2_BUCKET_NAME: optional(z.string()),
+  R2_PUBLIC_URL_BASE: optional(z.string().url()),
+
   // Worker tuning (ARCHITECTURE.md §5)
   QUEUE_CONCURRENCY_WEBHOOK: z.coerce.number().default(20),
   QUEUE_CONCURRENCY_MESSAGE_SEND: z.coerce.number().default(10),

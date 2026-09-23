@@ -86,6 +86,26 @@ async function authFetch<T>(path: string, init?: RequestInit, isRetry = false): 
   return res.json() as Promise<T>;
 }
 
+/**
+ * Multipart upload — deliberately NOT authFetch, which always forces
+ * `Content-Type: application/json` whenever a body is present. Sending a
+ * FormData body under that header breaks the multipart boundary Meta/the
+ * browser needs; the browser must set Content-Type itself here.
+ */
+async function authUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = getAccessToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(body?.message ?? `Upload failed (${res.status})`, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ── Instagram accounts ────────────────────────────────────────────────────
 
 export interface ConnectedAccount {
@@ -118,6 +138,25 @@ export const instagramApi = {
   syncProfile: (accountId: string) =>
     authFetch<ConnectedAccount>(`/instagram/accounts/${accountId}/sync-profile`, { method: 'POST' }),
   disconnect: (accountId: string) => authFetch<void>(`/instagram/accounts/${accountId}`, { method: 'DELETE' }),
+};
+
+// ── Media uploads (Cloudflare R2 — DM attachments) ─────────────────────────
+
+export type MediaKind = 'image' | 'video' | 'audio' | 'file';
+
+export interface UploadedMedia {
+  url: string;
+  type: MediaKind;
+  sizeBytes: number;
+  filename: string;
+}
+
+export const mediaApi = {
+  upload: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return authUpload<UploadedMedia>('/media/upload', formData);
+  },
 };
 
 // ── Automations ────────────────────────────────────────────────────────────
@@ -173,13 +212,24 @@ export interface ActionChildrenInput {
   else: ActionInput[];
 }
 
+// A media attachment on a SEND_DM message — image (incl. GIF), video,
+// audio, or a PDF file. `url` always comes from mediaApi.upload (R2-hosted),
+// never typed in freehand. Mutually exclusive with `buttons` on the same
+// payload (enforced server-side — Meta sends these as different message
+// shapes) and, since Meta's raw attachment send has no caption field, `text`
+// is not required when `media` is set.
+export interface ActionMediaInput {
+  type: MediaKind;
+  url: string;
+}
+
 export interface ActionInput {
   type: ActionType;
   order?: number;
   delaySeconds?: number;
-  // Required for every type except CONDITION, which carries no message of
-  // its own.
-  payload?: { text: string; buttons?: ActionButtonInput[] };
+  // Required for every type except CONDITION and HIDE_COMMENT, and unless
+  // `media` is set (a media-only message has no text of its own).
+  payload?: { text?: string; buttons?: ActionButtonInput[]; media?: ActionMediaInput };
   // Required only for CONDITION actions.
   condition?: ConditionInput;
   children?: ActionChildrenInput;
@@ -198,7 +248,7 @@ export interface AutomationAction {
   type: ActionType;
   order: number;
   delaySeconds: number;
-  payload: { text: string; buttons?: ActionButtonInput[] } | null;
+  payload: { text?: string; buttons?: ActionButtonInput[]; media?: ActionMediaInput } | null;
   branch: ActionBranch | null;
   condition: ConditionOutput | null;
   children: AutomationAction[];

@@ -1,12 +1,47 @@
 'use client';
 
-import { ArrowBendDownRight, EyeSlash, LockSimple, Plus, Trash } from '@phosphor-icons/react';
+import { useRef, useState } from 'react';
+import {
+  ArrowBendDownRight,
+  CircleNotch,
+  EyeSlash,
+  File as FileIcon,
+  FileAudio,
+  FileVideo,
+  Image as ImageIcon,
+  LockSimple,
+  Paperclip,
+  Plus,
+  Trash,
+  WarningCircle,
+  X,
+} from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import type { ActionButtonKind, ActionInput, ActionType, AutomationAction, ConditionField, TriggerMatchType } from '@/lib/api';
+import {
+  ApiError,
+  mediaApi,
+  type ActionButtonKind,
+  type ActionInput,
+  type ActionType,
+  type AutomationAction,
+  type ConditionField,
+  type MediaKind,
+  type TriggerMatchType,
+} from '@/lib/api';
+
+const ACCEPTED_MEDIA_TYPES =
+  'image/png,image/jpeg,image/gif,video/mp4,video/ogg,video/webm,video/quicktime,video/x-msvideo,audio/aac,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,application/pdf';
+
+const MEDIA_ICON: Record<MediaKind, typeof ImageIcon> = {
+  image: ImageIcon,
+  video: FileVideo,
+  audio: FileAudio,
+  file: FileIcon,
+};
 
 // Mirrors AutomationsService.MAX_ACTION_TREE_DEPTH on the backend (see
 // automations.service.ts) — kept in sync manually since there's no shared
@@ -48,6 +83,16 @@ export interface ButtonNode {
   lockedText: string;
 }
 
+// A media attachment picked in the builder. Mutually exclusive with
+// `buttons` on the same step — Meta sends these as different message
+// shapes (see ActionMediaInput on the backend/lib/api.ts side).
+export interface MediaNode {
+  type: MediaKind;
+  url: string;
+  filename: string;
+  sizeBytes: number;
+}
+
 // The local editor's tree node — a flat shape covering both message actions
 // and CONDITION actions (same house convention as the existing ActionRow:
 // every field present regardless of type, only the relevant ones read at
@@ -59,6 +104,7 @@ export interface ActionStepNode {
   text: string;
   delaySeconds: string;
   buttons: ButtonNode[];
+  media: MediaNode | null;
   conditionField: ConditionField;
   conditionMatchType: TriggerMatchType;
   conditionKeywords: string;
@@ -84,6 +130,7 @@ export function emptyActionStep(type: ActionType = 'SEND_DM'): ActionStepNode {
     text: '',
     delaySeconds: '0',
     buttons: [],
+    media: null,
     conditionField: 'COMMENT_TEXT',
     conditionMatchType: 'CONTAINS',
     conditionKeywords: '',
@@ -162,20 +209,25 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
       order: index,
       delaySeconds: Number(n.delaySeconds) || 0,
       payload: {
-        text: n.text.trim(),
-        buttons: n.buttons.length
-          ? n.buttons.map((b) =>
-              b.type === 'POSTBACK'
-                ? {
-                    title: b.title.trim(),
-                    type: b.type,
-                    requireFollow: b.requireFollow,
-                    unlockedText: b.unlockedText.trim(),
-                    lockedText: b.requireFollow ? b.lockedText.trim() : undefined,
-                  }
-                : { title: b.title.trim(), type: b.type, url: b.url.trim() },
-            )
-          : undefined,
+        // A media-only message has no caption field on Meta's side — omit
+        // text entirely rather than send an empty string when attached.
+        text: n.media ? undefined : n.text.trim(),
+        buttons: n.media
+          ? undefined
+          : n.buttons.length
+            ? n.buttons.map((b) =>
+                b.type === 'POSTBACK'
+                  ? {
+                      title: b.title.trim(),
+                      type: b.type,
+                      requireFollow: b.requireFollow,
+                      unlockedText: b.unlockedText.trim(),
+                      lockedText: b.requireFollow ? b.lockedText.trim() : undefined,
+                    }
+                  : { title: b.title.trim(), type: b.type, url: b.url.trim() },
+              )
+            : undefined,
+        media: n.media ? { type: n.media.type, url: n.media.url } : undefined,
       },
     };
   });
@@ -197,6 +249,7 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         text: '',
         delaySeconds: '0',
         buttons: [],
+        media: null,
         conditionField: action.condition.field ?? 'COMMENT_TEXT',
         conditionMatchType: action.condition.matchType,
         conditionKeywords: action.condition.keywords.join(', '),
@@ -219,6 +272,18 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         unlockedText: b.unlockedText ?? '',
         lockedText: b.lockedText ?? '',
       })),
+      // Only `type`/`url` are persisted server-side (ActionMediaDto) —
+      // filename/size are upload-time-only presentation details, so the
+      // preview derives a filename from the URL and shows no size on an
+      // already-saved attachment.
+      media: action.payload?.media
+        ? {
+            type: action.payload.media.type,
+            url: action.payload.media.url,
+            filename: action.payload.media.url.split('/').pop() ?? 'file',
+            sizeBytes: 0,
+          }
+        : null,
       conditionField: 'COMMENT_TEXT',
       conditionMatchType: 'CONTAINS',
       conditionKeywords: '',
@@ -257,8 +322,12 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
       if (thenError) return thenError;
       const elseError = validateActionSteps(node.else, depth + 1);
       if (elseError) return elseError;
-    } else if (!NO_PAYLOAD_TYPES.includes(node.type) && node.text.trim() === '') {
+    } else if (!NO_PAYLOAD_TYPES.includes(node.type) && !node.media && node.text.trim() === '') {
       return 'Every action needs a message.';
+    } else if (node.type !== 'SEND_DM' && node.media) {
+      return 'Media attachments are only available on "Send a DM" steps.';
+    } else if (node.media && node.buttons.length > 0) {
+      return 'A message can have buttons or a media attachment, not both.';
     } else if (node.buttons.length > 0) {
       if (node.buttons.length > 3) {
         return 'A message can have at most 3 buttons.';
@@ -498,30 +567,34 @@ export function ActionStepEditor({
             </p>
           ) : (
             <>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">
-                  Message
-                </Label>
-                <textarea
-                  id={`step-text-${node.id}`}
-                  value={node.text}
-                  onChange={(e) => onUpdate(node.id, { text: e.target.value })}
-                  rows={3}
-                  placeholder="Hey {{username}}, here's the link!"
-                  className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Use {'{{username}}'} to insert the sender&apos;s name.
-                  {storyReplyWarning &&
-                    ' For story replies this will show a numeric ID, not a handle — Instagram’s webhook doesn’t include a username for those.'}
-                </p>
-              </div>
+              {!node.media && (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">
+                    Message
+                  </Label>
+                  <textarea
+                    id={`step-text-${node.id}`}
+                    value={node.text}
+                    onChange={(e) => onUpdate(node.id, { text: e.target.value })}
+                    rows={3}
+                    placeholder="Hey {{username}}, here's the link!"
+                    className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use {'{{username}}'} to insert the sender&apos;s name.
+                    {storyReplyWarning &&
+                      ' For story replies this will show a numeric ID, not a handle — Instagram’s webhook doesn’t include a username for those.'}
+                  </p>
+                </div>
+              )}
 
               {node.type === 'SEND_DM' && (
-                <ButtonListEditor
-                  node={node}
-                  onUpdate={(patch) => onUpdate(node.id, patch)}
-                />
+                <>
+                  {!node.media && <ButtonListEditor node={node} onUpdate={(patch) => onUpdate(node.id, patch)} />}
+                  {node.buttons.length === 0 && (
+                    <MediaAttachmentEditor node={node} onUpdate={(patch) => onUpdate(node.id, patch)} />
+                  )}
+                </>
               )}
             </>
           )}
@@ -653,6 +726,103 @@ function ButtonListEditor({ node, onUpdate }: { node: ActionStepNode; onUpdate: 
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '';
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Uploads a file to Convozy's own R2-backed /media/upload endpoint and
+ * attaches the returned URL to this step. Mutually exclusive with buttons
+ * (enforced by the parent only rendering this when node.buttons is empty,
+ * and vice versa) — Meta sends a media attachment and a Button Template as
+ * different message shapes, never combined.
+ */
+function MediaAttachmentEditor({
+  node,
+  onUpdate,
+}: {
+  node: ActionStepNode;
+  onUpdate: (patch: Partial<ActionStepNode>) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file after removing it
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+    try {
+      const uploaded = await mediaApi.upload(file);
+      onUpdate({
+        media: { type: uploaded.type, url: uploaded.url, filename: uploaded.filename, sizeBytes: uploaded.sizeBytes },
+        text: '',
+      });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not upload this file.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  if (node.media) {
+    const Icon = MEDIA_ICON[node.media.type];
+    const sizeLabel = formatBytes(node.media.sizeBytes);
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-border bg-background p-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-muted">
+            <Icon size={15} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm text-foreground">{node.media.filename}</p>
+            <p className="text-xs capitalize text-muted-foreground">
+              {node.media.type}
+              {sizeLabel && ` · ${sizeLabel}`}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => onUpdate({ media: null })}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
+          aria-label="Remove attachment"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <input ref={inputRef} type="file" accept={ACCEPTED_MEDIA_TYPES} onChange={handleFileSelected} className="hidden" />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-fit"
+        disabled={uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? <CircleNotch size={13} className="animate-spin" /> : <Paperclip size={13} />}
+        {uploading ? 'Uploading…' : 'Attach a photo, video, audio, or PDF'}
+      </Button>
+      {error && (
+        <p className="flex items-center gap-1.5 text-xs text-danger">
+          <WarningCircle size={13} />
+          {error}
+        </p>
+      )}
     </div>
   );
 }
