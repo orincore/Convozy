@@ -1268,11 +1268,63 @@ though the file itself was fine. `.m4a`'s canonical/IANA-registered type is
   moved or deleted) to correct the `Content-Type` header on the 5
   already-uploaded m4a objects — confirmed via `curl -I` before/after — so
   the user's existing automation didn't need the file re-attached.
-- Deployed via `infra/scripts/deploy.sh` (`59d393e` → `5ddf54b`). Verified
-  live: containers healthy, `/health` 200. **Not yet confirmed against a
-  real Meta send** — ask the user to re-trigger the automation so a
-  worker-log check can confirm `error_subcode 2018007` no longer occurs and
-  the voice note actually arrives.
+- Deployed via `infra/scripts/deploy.sh` (`59d393e` → `5ddf54b`). User
+  re-tapped the button — **still failed, same `error_subcode 2018007`.**
+  The Content-Type fix was real but insufficient; root cause was deeper.
+
+**Same-day follow-up: real root cause found and fixed.** Reproduced the
+failure directly against the live production Graph API (`graph.instagram.com`
+— the **Instagram API with Instagram Login**, confirmed to be a distinct
+product surface from the older Facebook-Page-linked **Messenger Platform**
+docs that were checked earlier in this feature's history; the two have
+separately-documented but apparently-identical attachment tables, so this
+distinction wasn't itself the bug, but is worth remembering next time Meta
+docs are checked for this integration). Diagnostic script run inside the API
+container (decrypted the real account token via the existing
+`decryptSecret`, called `graph.instagram.com` directly, cleaned up after):
+- `type: 'file'` on the same m4a URL → identical `2018007` failure, ruling
+  out `type: 'audio'` itself as unsupported.
+- `type: 'image'` on an external URL and on our own R2 domain → both `200`,
+  ruling out the R2/Cloudflare domain being blocked.
+- Root cause: the failing file was a genuine **Apple Voice Memos** export
+  (confirmed via its `voice-memo-uuid` metadata atom) — Voice Memos writes
+  the `moov` atom at the *end* of the file (not "faststart"). Installed
+  ffmpeg locally, remuxed a faststart copy of the *identical* audio, sent it
+  to the same real recipient via the same account/token → succeeded
+  (real `message_id` returned, user confirmed receipt in the DM thread).
+  Since Apple Voice Memos is the single most common real source of a
+  creator's "voice note" upload, this wasn't an edge case — it would have
+  broken the feature for most real users.
+- Also tested raw mp3 on the same pipeline: a clean, *different* rejection
+  ("format not supported", `error_subcode 2534080`) — confirms Meta
+  distinguishes "wrong format" from "right format, failed to ingest," and
+  that mp3 needs real transcoding, not just acceptance, to actually work.
+- Fix: new `audio-normalizer.ts` — every `kind:'audio'` upload is now
+  re-encoded through ffmpeg (`execFile`, no shell) to one canonical shape
+  (AAC-LC, 44.1kHz mono, `movflags +faststart`) regardless of source format
+  (aac/m4a/wav/mp3). `MediaService.uploadFile` always stores the result as
+  `.m4a` / `audio/mp4`, independent of which input MIME matched. A
+  normalization failure is now `AUDIO_PROCESSING_FAILED`, not a silently
+  broken upload. `api.Dockerfile` installs `ffmpeg` in the runtime stage
+  (API-only; the worker never touches raw files).
+- 10/10 media tests (3 new), 221/221 full suite, clean `tsc`. Verified the
+  real ffmpeg invocation locally (not just the mocked unit test) produces
+  byte-identical output to the manually-remuxed file already confirmed sent.
+- Deployed via `infra/scripts/deploy.sh` (`5ddf54b` → `3ba3e95`), confirmed
+  `ffmpeg -version` runs inside the live container. Also ran a one-time
+  script re-normalizing the 5 already-uploaded (pre-fix) m4a objects
+  in-place in the production R2 bucket, so the user's existing automation
+  didn't need the file re-attached.
+- **Verified against the real Graph API, not yet against the exact
+  production automation path**: the diagnostic script's direct
+  `graph.instagram.com` call with a faststart-remuxed copy of the user's own
+  audio succeeded and the user confirmed receipt in their real DM thread —
+  but that call bypassed the app's normal button-tap → postback →
+  `MessageSendProcessor` path. The 5 existing R2 objects are now
+  re-normalized and the deployed code path routes all *new* uploads through
+  the same `audio-normalizer.ts`, so the fix should hold — but ask the user
+  to re-tap the button one more time post-deploy to confirm the real
+  end-to-end path (not just the direct API call) delivers the voice note.
 
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
