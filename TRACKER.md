@@ -1232,6 +1232,21 @@ and verified live (2026-09-23):
   `ContactsModule` wiring into `AutomationsModule` boots cleanly (no DI
   errors) and `/custom-fields`/`/automations` respond 200.
 
+**Follow-up, same day (2026-09-23): mp3 audio uploads for DM voice-note-style
+attachments.** Backend (`media.service.ts`) already accepted `audio/mpeg`
+(mp3) as of `de02ef5`, with a comment flagging it's shipped best-effort since
+mp3 isn't in Meta's own documented audio-format list (aac/m4a/wav/mp4 only) —
+but the frontend's `ACCEPTED_MEDIA_TYPES` file-picker allowlist in
+`action-step-editor.tsx` was never updated to match, so the file picker
+silently filtered mp3 files out before they ever reached the already-working
+backend. Fixed in `59d393e` (added `audio/mpeg` to the frontend accept list).
+No send-side change needed — Instagram's Send API has no distinct
+voice-message type (unlike WhatsApp Cloud API's `voice:true`); a generic
+`type:"audio"` attachment already renders as a playable voice-note-style
+bubble in the DM thread regardless of source format.
+Deployed via `infra/scripts/deploy.sh` (`04ce26e` → `59d393e`). Verified live:
+containers healthy, `/health` 200.
+
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
 the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/
