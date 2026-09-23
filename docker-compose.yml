@@ -78,6 +78,8 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3000/api}
         NEXT_PUBLIC_APP_BASE_URL: ${NEXT_PUBLIC_APP_BASE_URL:-http://localhost:3001}
+        NEXT_PUBLIC_DONATE_URL: ${NEXT_PUBLIC_DONATE_URL:-}
+        NEXT_PUBLIC_DONATE_UPI: ${NEXT_PUBLIC_DONATE_UPI:-}
     restart: unless-stopped
     env_file: .env
     ports:

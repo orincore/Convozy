@@ -378,6 +378,32 @@ pages (Accounts, Automations, Activity; see `ui.md` §2). This is a checklist of
 
 ---
 
+### 12d. Mandatory design tooling for ALL UI/UX work (user directive, 2026-09-24)
+
+The user has had to repeat this every time, so it is a hard rule, not a
+suggestion. For **any** UI/UX work (new pages, redesigns, components, animations,
+copy-in-layout, marketing or dashboard) you MUST, before writing UI code and
+without being reminded:
+
+1. **Load the design skills**: `taste-skill:taste-skill` plus the high-end
+   direction (`taste-skill:soft-skill`; the user calls it "high-end visual
+   design"). Follow their rules and their pre-flight checklist.
+2. **Use the Spectrum UI MCP (`spectrum-ui`) for animated assets**: search it
+   (`search_components`, `get_component`) and pull the best-suited animated
+   components/patterns for the section being built. Install into a scratch
+   directory and adapt the source rather than adding its dependencies
+   (framer-motion, lucide-react) to the repo: port to `motion/react`, Phosphor
+   icons and our tokens. Say which Spectrum asset each section is based on.
+3. Never present UI work as done without having done both. If the MCP has no
+   suitable asset for a section, say so explicitly instead of silently skipping.
+
+Notes: the user runs Claude through the `c2` alias (`CLAUDE_CONFIG_DIR=
+~/.claude-client2`); MCP servers must be registered in that config (see the
+`c2-mcp-config` memory). Existing locks still apply: dark theme (§12a) and
+honest copy (no invented stats, users, testimonials or scarcity).
+
+---
+
 ## 13. When in doubt
 
 Prefer: fewer moving parts > more moving parts. Boring, explicit code > clever

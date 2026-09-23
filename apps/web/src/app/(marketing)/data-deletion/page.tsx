@@ -24,6 +24,14 @@ export const metadata: Metadata = {
 export default function DataDeletionPage() {
   return (
     <LegalArticle
+      title="Data Deletion Instructions"
+      updated={LAST_UPDATED}
+      summary={[
+        'Disconnect your Instagram account any time from your dashboard.',
+        'Email us to delete your account and everything linked to it.',
+        "If you commented on a creator's post, you can ask us to delete that too.",
+        'We act on requests within 30 days.',
+      ]}
       breadcrumb={
         <Breadcrumbs
           baseUrl={SITE_URL}
@@ -34,9 +42,6 @@ export default function DataDeletionPage() {
         />
       }
     >
-      <h1>Data Deletion Instructions</h1>
-      <p>Last updated: {LAST_UPDATED}</p>
-
       <h2>If you&rsquo;re a Convozy creator</h2>
       <p>You can remove your data in two ways:</p>
       <ul>

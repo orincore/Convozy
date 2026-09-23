@@ -13,6 +13,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const staticRoutes = [
     '/',
     '/pricing',
+    '/donate',
     '/features',
     '/features/comment-to-dm',
     '/privacy',

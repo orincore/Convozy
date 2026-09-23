@@ -1,167 +1,112 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { CircleNotch, WarningCircle } from '@phosphor-icons/react';
+import { motion, useReducedMotion } from 'motion/react';
+import { CheckCircle } from '@phosphor-icons/react';
 import { API_BASE_URL } from '@/lib/api';
-import { storeTokens } from '@/lib/auth';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { GoogleIcon } from '@/components/dashboard/google-icon';
 
 /**
- * Login/register screen. Functional dashboard UI (taste-skill §13: out of
- * scope for landing-page choreography) - built with the shared shadcn-style
- * primitives in components/ui, same dark monochrome tokens as the marketing
- * site (CLAUDE.md §12a).
+ * Login screen. Google is the only way in (it also creates the account for
+ * new people), so there is no sign-up page and no password form. Split layout:
+ * a brand panel on large screens and the card on the right, in a double-bezel
+ * card after Spectrum UI's Login Card.
  */
+const EASE = [0.32, 0.72, 0, 1] as [number, number, number, number];
+
+const PERKS = [
+  'Every feature is free, with no card needed',
+  'Live in minutes, no code',
+  'Disconnect Instagram any time',
+];
+
 export default function LoginPage() {
-  const router = useRouter();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [workspaceName, setWorkspaceName] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-
-    const path = mode === 'login' ? '/auth/login' : '/auth/register';
-    const body =
-      mode === 'login' ? { email, password } : { email, password, name, workspaceName };
-
-    try {
-      const res = await fetch(`${API_BASE_URL}${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message ?? `Request failed (${res.status})`);
-      }
-      const tokens = await res.json();
-      storeTokens(tokens);
-      router.replace('/app');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const reduce = useReducedMotion();
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <Link href="/" className="mb-8 flex items-center justify-center gap-2 text-foreground">
-          <Image src="/brand/logo-white.png" alt="" width={28} height={27} className="h-7 w-auto" />
-          <span className="text-lg font-semibold tracking-tight">Convozy</span>
+    <div className="relative grid min-h-[100dvh] overflow-hidden lg:grid-cols-2">
+      <div aria-hidden="true" className="pointer-events-none absolute -left-32 top-0 size-[32rem] rounded-full bg-white/[0.06] blur-[120px]" />
+
+      {/* brand panel */}
+      <div className="relative hidden flex-col justify-between p-12 lg:flex">
+        <Link href="/" className="flex w-fit items-center gap-2.5 text-foreground">
+          <Image src="/brand/logo-white.png" alt="" width={32} height={31} className="h-8 w-auto" />
+          <span className="text-xl font-semibold tracking-tight">Convozy</span>
         </Link>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{mode === 'login' ? 'Log in' : 'Create your account'}</CardTitle>
-            <CardDescription>
-              {mode === 'login'
-                ? 'Welcome back. Log in to manage your automations.'
-                : 'Start automating your Instagram comments and DMs.'}
-            </CardDescription>
-          </CardHeader>
+        <div>
+          <motion.h1
+            initial={reduce ? false : { opacity: 0, y: 28, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ duration: 0.9, ease: EASE }}
+            className="font-display max-w-md text-5xl font-semibold leading-[1.05] tracking-tight text-balance"
+          >
+            Welcome back. Your DMs missed you.
+          </motion.h1>
+          <ul className="mt-10 flex max-w-md flex-col gap-3">
+            {PERKS.map((p, i) => (
+              <motion.li
+                key={p}
+                initial={reduce ? false : { opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.7, delay: 0.3 + i * 0.1, ease: EASE }}
+                className="flex items-center gap-3 rounded-2xl bg-white/[0.05] px-4 py-3.5 text-sm shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)]"
+              >
+                <CheckCircle size={18} weight="fill" />
+                {p}
+              </motion.li>
+            ))}
+          </ul>
+        </div>
 
-          <CardContent className="flex flex-col gap-5">
-            <a
-              href={`${API_BASE_URL}/auth/google`}
-              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-[var(--radius-control)] border border-border bg-card text-sm font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <GoogleIcon className="h-4 w-4" />
-              Continue with Google
-            </a>
+        <p className="text-sm text-muted-foreground">A product of Orincore</p>
+      </div>
 
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              or
-              <span className="h-px flex-1 bg-border" />
+      {/* sign-in card */}
+      <div className="relative flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          <Link href="/" className="mb-8 flex items-center justify-center gap-2 text-foreground lg:hidden">
+            <Image src="/brand/logo-white.png" alt="" width={28} height={27} className="h-7 w-auto" />
+            <span className="text-lg font-semibold tracking-tight">Convozy</span>
+          </Link>
+
+          <motion.div
+            initial={reduce ? false : { opacity: 0, y: 24, filter: 'blur(8px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ duration: 0.8, ease: EASE }}
+            className="rounded-[2rem] border border-white/10 bg-white/[0.03] p-1.5"
+          >
+            <div className="rounded-[calc(2rem-0.375rem)] bg-card p-7 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] sm:p-9">
+              <h2 className="font-display text-3xl font-semibold tracking-tight">Log in</h2>
+              <p className="mt-2 text-muted-foreground">
+                One tap with Google. New here? It sets up your account too.
+              </p>
+
+              <a
+                href={`${API_BASE_URL}/auth/google`}
+                className="group mt-8 flex h-14 w-full items-center justify-center gap-3 rounded-full bg-accent text-base font-medium text-accent-foreground transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98]"
+              >
+                <span className="grid size-8 place-items-center rounded-full bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08)]">
+                  <GoogleIcon className="h-4 w-4" />
+                </span>
+                Continue with Google
+              </a>
             </div>
+          </motion.div>
 
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              {mode === 'register' && (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="name">Name</Label>
-                    <Input
-                      id="name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="workspaceName">Workspace name</Label>
-                    <Input
-                      id="workspaceName"
-                      value={workspaceName}
-                      onChange={(e) => setWorkspaceName(e.target.value)}
-                      required
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={8}
-                />
-              </div>
-
-              {error && (
-                <p role="alert" className="flex items-start gap-2 text-sm text-danger">
-                  <WarningCircle size={16} weight="bold" className="mt-0.5 shrink-0" />
-                  {error}
-                </p>
-              )}
-
-              <Button type="submit" disabled={submitting} className="mt-1">
-                {submitting && <CircleNotch size={16} className="animate-spin" />}
-                {mode === 'login' ? 'Log in' : 'Sign up'}
-              </Button>
-            </form>
-
-            <button
-              type="button"
-              onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {mode === 'login'
-                ? "Don't have an account? Sign up"
-                : 'Already have an account? Log in'}
-            </button>
-          </CardContent>
-        </Card>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            By continuing you agree to our{' '}
+            <Link href="/terms" className="underline underline-offset-2 hover:text-foreground">
+              Terms
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-foreground">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+        </div>
       </div>
     </div>
   );

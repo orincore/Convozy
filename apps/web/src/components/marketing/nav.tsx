@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AnimatePresence, motion, useScroll, useSpring } from 'motion/react';
 import { Logo } from './logo';
 import { CtaButton } from './cta-button';
+import { DonateHeaderButton } from './donate-header-button';
 
 const NAV_LINKS = [
   { href: '/features/comment-to-dm', label: 'Features' },
@@ -44,6 +45,7 @@ export function MarketingNav() {
           </ul>
 
           <div className="flex items-center gap-2">
+            <DonateHeaderButton />
             <Link
               href="/app/login"
               className="hidden px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"

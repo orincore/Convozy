@@ -22,6 +22,14 @@ export const metadata: Metadata = {
 export default function TermsOfServicePage() {
   return (
     <LegalArticle
+      title="Terms of Service"
+      updated={LAST_UPDATED}
+      summary={[
+        'Use Convozy only on Instagram accounts you have the right to connect.',
+        "No spam, no misleading messages, and follow Instagram's rules.",
+        'You can disconnect or delete your account at any time.',
+        'Convozy relies on Meta, so we cannot promise uninterrupted service.',
+      ]}
       breadcrumb={
         <Breadcrumbs
           baseUrl={SITE_URL}
@@ -32,9 +40,6 @@ export default function TermsOfServicePage() {
         />
       }
     >
-      <h1>Terms of Service</h1>
-      <p>Last updated: {LAST_UPDATED}</p>
-
       <h2>1. Acceptance</h2>
       <p>
         By creating an account or connecting an Instagram Business Account to Convozy

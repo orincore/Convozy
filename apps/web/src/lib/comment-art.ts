@@ -18,7 +18,7 @@ export interface CommentArt {
 const SAMPLES: Record<string, CommentArt> = {
   sample: {
     id: 'sample',
-    handle: 'your.handle',
+    handle: 'mira.makes',
     postTitle: 'Comment PRICE and I will send it over',
     comments: [
       { user: 'jordan.k', text: 'Love this so much' },

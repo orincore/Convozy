@@ -13,7 +13,7 @@ import type { MouseEvent, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 /**
- * Interactive card: cursor spotlight, a slowly orbiting border highlight and
+ * Interactive card: cursor spotlight, a border edge that glows where the pointer is, and
  * an optional 3D tilt, all on hover only (no always-on loops). Adapted from
  * Spectrum UI's Bento Card (spectrumhq.in): ported from framer-motion to
  * motion/react, from light/dark neutrals to our locked monochrome tokens,
@@ -39,6 +39,7 @@ export function SpotlightCard({
   const tiltY = useSpring(useMotionValue(0), { stiffness: 300, damping: 30 });
   const rotateX = useTransform(tiltY, [-150, 150], [4, -4]);
   const rotateY = useTransform(tiltX, [-150, 150], [-4, 4]);
+  const borderGlow = useMotionTemplate`radial-gradient(180px circle at ${x}px ${y}px, rgba(250,250,250,0.7), transparent 70%)`;
   const spotlight = useMotionTemplate`radial-gradient(320px circle at ${x}px ${y}px, rgba(250,250,250,0.09), transparent 75%)`;
 
   function handleMove(event: MouseEvent<HTMLDivElement>) {
@@ -81,22 +82,17 @@ export function SpotlightCard({
         className="pointer-events-none absolute -inset-px z-10 rounded-[inherit] transition-opacity duration-300"
         style={{ background: spotlight, opacity: hovered ? 1 : 0 }}
       />
-      {hovered && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] p-px [mask-composite:exclude] [mask:linear-gradient(#000,#000)_content-box,linear-gradient(#000,#000)]"
-        >
-          <motion.div
-            className="absolute left-1/2 top-1/2 aspect-square w-[250%] -translate-x-1/2 -translate-y-1/2"
-            style={{
-              background:
-                'conic-gradient(from 0deg, rgba(250,250,250,0) 0%, rgba(250,250,250,0.55) 50%, rgba(250,250,250,0) 100%)',
-            }}
-            animate={{ rotate: 360 }}
-            transition={{ repeat: Infinity, ease: 'linear', duration: 6 }}
-          />
-        </div>
-      )}
+      <motion.div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-10 rounded-[inherit] p-px transition-opacity duration-300"
+        style={{
+          background: borderGlow,
+          opacity: hovered ? 1 : 0,
+          WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+          WebkitMaskComposite: 'xor',
+          mask: 'linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0)',
+        }}
+      />
       {children}
     </motion.div>
   );

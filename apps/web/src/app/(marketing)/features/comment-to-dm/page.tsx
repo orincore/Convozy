@@ -4,6 +4,9 @@ import { Breadcrumbs } from '@/components/seo/breadcrumbs';
 import { CtaButton } from '@/components/marketing/cta-button';
 import { Reveal } from '@/components/marketing/reveal';
 import { AutomationPreview } from '@/components/marketing/automation-preview';
+import { Bezel } from '@/components/marketing/bezel';
+import { LiveDemo } from '@/components/marketing/live-demo';
+import { ActivityFeed } from '@/components/marketing/activity-feed';
 import { JsonLd } from '@/components/seo/json-ld';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
@@ -107,6 +110,27 @@ export default function CommentToDmFeaturePage() {
         </div>
 
         <AutomationPreview />
+      </div>
+
+      <div className="mt-24 border-t border-border pt-16">
+        <h2 className="font-display text-2xl font-semibold tracking-tight">Watch a comment turn into a DM</h2>
+        <p className="mt-2 text-muted-foreground">Pick a keyword. This is an example of what happens on your account.</p>
+        <div className="mt-10 grid items-stretch gap-6 lg:grid-cols-12">
+          <div className="lg:col-span-7">
+            <Reveal className="h-full">
+              <Bezel className="h-full">
+                <LiveDemo />
+              </Bezel>
+            </Reveal>
+          </div>
+          <div className="lg:col-span-5">
+            <Reveal delay={0.1} className="h-full">
+              <Bezel className="h-full">
+                <ActivityFeed />
+              </Bezel>
+            </Reveal>
+          </div>
+        </div>
       </div>
 
       <div className="mt-24 grid gap-10 border-t border-border pt-16 md:grid-cols-3 md:gap-8">

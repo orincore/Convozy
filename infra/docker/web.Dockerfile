@@ -22,6 +22,12 @@ ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 # Public site origin: baked into canonical/OG/sitemap URLs at build time.
 ARG NEXT_PUBLIC_APP_BASE_URL
 ENV NEXT_PUBLIC_APP_BASE_URL=$NEXT_PUBLIC_APP_BASE_URL
+# Where the Donate buttons point (a pay-what-you-wish page); falls back to email if unset.
+ARG NEXT_PUBLIC_DONATE_URL
+ENV NEXT_PUBLIC_DONATE_URL=$NEXT_PUBLIC_DONATE_URL
+# UPI ID for the donate page's UPI button (optional).
+ARG NEXT_PUBLIC_DONATE_UPI
+ENV NEXT_PUBLIC_DONATE_UPI=$NEXT_PUBLIC_DONATE_UPI
 COPY . .
 RUN pnpm --filter=@convozy/shared build
 RUN pnpm --filter=@convozy/web build

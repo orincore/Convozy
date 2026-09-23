@@ -24,6 +24,15 @@ export const metadata: Metadata = {
 export default function PrivacyPolicyPage() {
   return (
     <LegalArticle
+      title="Privacy Policy"
+      updated={LAST_UPDATED}
+      summary={[
+        'We only collect what we need to run your automations.',
+        'Your Instagram connection is stored encrypted.',
+        "We never sell your data or your followers' data.",
+        'AI features only see messages if you switch them on.',
+        'You can ask us to delete everything at any time.',
+      ]}
       breadcrumb={
         <Breadcrumbs
           baseUrl={SITE_URL}
@@ -34,9 +43,6 @@ export default function PrivacyPolicyPage() {
         />
       }
     >
-      <h1>Privacy Policy</h1>
-      <p>Last updated: {LAST_UPDATED}</p>
-
       <h2>1. Who we are</h2>
       <p>
         Convozy (&ldquo;Convozy&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) is a product of Orincore,

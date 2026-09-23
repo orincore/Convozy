@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
+import { Avatar } from './avatar';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   ArrowUp,
@@ -31,34 +32,20 @@ const GLASS =
  */
 type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-function Avatar({ label, dim }: { label: string; dim?: boolean }) {
-  return (
-    <span
-      className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-white/35 to-white/5 font-semibold shadow-[inset_0_1px_1px_rgba(255,255,255,0.35)] ${
-        dim ? 'size-5 text-[9px]' : 'size-7 text-[11px]'
-      }`}
-    >
-      {label}
-    </span>
-  );
-}
-
 function Comment({
   name,
   time,
-  avatar,
   small,
   children,
 }: {
   name: string;
   time: string;
-  avatar: string;
   small?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex gap-2.5">
-      <Avatar label={avatar} dim={small} />
+      <Avatar who={name} size={small ? 20 : 28} />
       <div className="min-w-0 flex-1 text-[11px] leading-snug">
         <p>
           <span className="font-semibold">{name}</span>{' '}
@@ -172,9 +159,9 @@ export function AutomationPreview() {
                   transition={{ duration: 0.4, delay: 0.15 }}
                   className="flex h-full items-center gap-2.5 px-3"
                 >
-                  <Avatar label="Y" />
+                  <Avatar who="mira.makes" />
                   <div className="min-w-0 text-left leading-tight">
-                    <p className="text-[11px] font-semibold">your.handle</p>
+                    <p className="text-[11px] font-semibold">mira.makes</p>
                     <p className="truncate text-[10px] text-muted-foreground">Sent you a message</p>
                   </div>
                 </motion.div>
@@ -193,8 +180,8 @@ export function AutomationPreview() {
                 className="absolute inset-0 flex flex-col pt-11"
               >
                 <div className="flex items-center gap-2 px-4 pb-2.5">
-                  <Avatar label="Y" />
-                  <span className="text-xs font-semibold">your.handle</span>
+                  <Avatar who="mira.makes" />
+                  <span className="text-xs font-semibold">mira.makes</span>
                   <DotsThree size={18} className="ml-auto text-muted-foreground" />
                 </div>
                 <div className="relative h-44 w-full shrink-0">
@@ -231,10 +218,10 @@ export function AutomationPreview() {
                     animate={{ y: shown >= 2 ? -58 : 0 }}
                     transition={{ type: 'spring', stiffness: 120, damping: 20 }}
                   >
-                    <Comment name="your.handle" time="1d" avatar="Y">
+                    <Comment name="mira.makes" time="1d">
                       Comment {active.comment.split(/[ ?!,]/)[0]} and I&apos;ll send it over
                     </Comment>
-                    <Comment name="jordan.k" time="5h" avatar="J">
+                    <Comment name="jordan.k" time="5h">
                       Love this so much
                     </Comment>
 
@@ -246,7 +233,7 @@ export function AutomationPreview() {
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           transition={SPRING}
                         >
-                          <Comment name="a.follower" time="Just now" avatar="A">
+                          <Comment name="a.follower" time="Just now">
                             {active.comment}
                           </Comment>
                         </motion.div>
@@ -262,7 +249,7 @@ export function AutomationPreview() {
                           transition={SPRING}
                           className="ml-9"
                         >
-                          <Comment name="your.handle" time="Just now" avatar="Y" small>
+                          <Comment name="mira.makes" time="Just now" small>
                             <AnimatePresence mode="wait" initial={false}>
                               {shown === 2 ? (
                                 <motion.span
@@ -292,7 +279,7 @@ export function AutomationPreview() {
                   </div>
 
                   <div className="flex items-center gap-2 border-t border-white/[0.06] px-3 pb-3 pt-2.5">
-                    <Avatar label="A" />
+                    <Avatar who="a.follower" />
                     <div className="flex h-9 min-w-0 flex-1 items-center rounded-full bg-white/[0.07] px-3.5 text-[11px]">
                       {shown === 0 && shownTyped > 0 ? (
                         <span className="truncate">
@@ -302,7 +289,7 @@ export function AutomationPreview() {
                           )}
                         </span>
                       ) : (
-                        <span className="truncate text-muted-foreground">Add a comment for your.handle...</span>
+                        <span className="truncate text-muted-foreground">Add a comment for mira.makes...</span>
                       )}
                     </div>
                     <motion.span
@@ -329,14 +316,14 @@ export function AutomationPreview() {
               >
                 <div className="flex items-center gap-2 px-3 pb-3">
                   <CaretLeft size={18} className="text-muted-foreground" />
-                  <Avatar label="Y" />
-                  <span className="text-xs font-semibold">your.handle</span>
+                  <Avatar who="mira.makes" />
+                  <span className="text-xs font-semibold">mira.makes</span>
                 </div>
 
                 <div className="flex flex-1 flex-col justify-end gap-2 px-4 pb-8">
                   <p className="text-center text-[10px] text-muted-foreground">Just now</p>
                   <div className="flex items-end gap-2">
-                    <Avatar label="Y" dim />
+                    <Avatar who="mira.makes" size={20} />
                     <AnimatePresence mode="wait" initial={false}>
                       {shown === 5 ? (
                         <motion.div

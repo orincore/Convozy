@@ -344,6 +344,64 @@ partnership claimed) via AskUserQuestion.
   `public/brand/`); black logo is the tab icon (`src/app/icon.png`, on a
   white rounded tile so it stays visible on dark tab bars, plus
   `apple-icon.png`).
+- ✅ **Features showcase** (2026-09-24): `/features` now lists every feature
+  from MANYCHAT_FEATURE_AUDIT.md as an animated card (`FeatureCard` +
+  `feature-visuals.tsx`, data in `src/lib/features.ts`), 11 marked live
+  (story replies, live comments, post scoping, conditions, contacts/tags,
+  segments, templates, comment moderation, DM buttons + follow gate, merge
+  tags, timed replies) and 7 marked "Coming soon" (sequences, broadcasts,
+  analytics, AI replies, inbox takeover, external requests, links/QR).
+  Homepage shows six of them. "All free" is true for the live ones (Free plan
+  has every feature key on); the coming-soon ones are only described as
+  planned. Follow-to-DM and Shopify/white-label deliberately omitted (no
+  Meta endpoint / out of scope). Visuals adapt Spectrum patterns (streaming
+  text, stepper, swipe-to-hide, bell, sparkline, toast stack). Not deployed.
+- ✅ **Meta Tech Provider status shown** (2026-09-24): the owner confirmed
+  Convozy was approved as a Meta Tech Provider and is live with users, so the
+  homepage now has a large centered "Official Meta Business Partner" statement (owner
+  explicitly chose this wording over "Tech Provider")
+  with the Meta and Instagram marks (supersedes the earlier "Built on"
+  wording, which existed because no approval was recorded here). Recorded from
+  the owner's word, not verified in the Meta dashboard. "Tech Provider" is the
+  program named; the separate "Meta Business Partner" badge would need its own
+  confirmation.
+- ✅ **Homepage rebalanced so no single feature dominates** (2026-09-24):
+  the comment-to-DM demo pair (`LiveDemo` + `ActivityFeed`, now equal height)
+  moved to `/features/comment-to-dm`. Homepage order: hero, Meta partner,
+  three-step explainer (`HowItWorks`, now trigger-agnostic: comment / Story
+  reply / live comment; scroll-filled line, running-to-check badges, based on
+  Spectrum Agent Steps), ALL 12 live features as equal cards (comment to DM
+  is one card among them) plus an "On the way" chip row, then "Built for
+  creators, brands and agencies" (`Audiences`, Avatar Stack + Conversation
+  List patterns). The agencies panel is tagged Coming soon: a shared
+  team/agency CRM is planned, not built. Replaced the old "Built for creators,
+  not marketing teams" wording.
+- ✅ **/pricing redesigned** (2026-09-24): big Free card (`$0`, every live
+  feature, animated check-in list) beside a Pro card ("Let's talk", includes
+  everything in Free plus more DMs, more accounts, priority support, AI
+  replies coming soon), a Free vs Pro comparison table (dashed rows, pop-in
+  checks), a looping "what happens at the limit" meter (Spectrum Usage Meter
+  + Quota Banner pattern), a "Why is it free?" note, tabbed pricing FAQ, and
+  a lattice CTA. Numbers deliberately absent (no confirmed DM limit or Pro
+  price). New: `pricing-sections.tsx`. Not deployed.
+- ✅ **/donate page** (2026-09-24): pay-what-you-wish page (amount chips + own
+  amount, heart burst after Spectrum's Like Button pattern). All "Donate what
+  you wish" buttons (pricing Pro card, comparison, FAQ Pro tab, homepage Pro
+  card) go there; "Get in touch" removed from the Pro card. **No payment
+  gateway exists in the API yet** (billing has only entitlements), so the page
+  shows only what is configured: `NEXT_PUBLIC_DONATE_UPI` (UPI deep link with
+  the chosen amount) and/or `NEXT_PUBLIC_DONATE_URL` (hosted card page); with
+  neither set it offers an email. Both vars are wired through the Dockerfile,
+  compose and .env.example. Not deployed; needs the owner's UPI ID / link.
+- ✅ **Legal pages + login redesigned, and full marketing overhaul deployed**
+  (2026-09-24): `LegalArticle` now has a hero with an "In short" summary, a
+  sticky "On this page" list with a sliding active pill (Spectrum Tree Nav
+  pattern) and the text in a double-bezel card; legal wording unchanged.
+  `/app/login` is a split layout (brand panel + form card) with floating-label
+  fields, show/hide password, sliding Log in / Sign up switch (Spectrum Login
+  Card + Floating Label Input); sign-in logic untouched. NOTE: `/terms` and
+  `/privacy` still describe paid plans and Stripe/Razorpay billing, which does
+  not match the donation-only model; needs the owner's decision (legal text).
 - ✅ **De-jargoned "Meta Graph API" site-wide** (user directive, 2026-09-24):
   the integration badge now labels the Meta mark just "Meta"; every prose
   mention of "Graph API" (`/privacy`, `/terms`, `/data-deletion`) reworded to
