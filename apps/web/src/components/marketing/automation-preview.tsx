@@ -126,18 +126,18 @@ export function AutomationPreview() {
     <div className="relative mx-auto w-full max-w-sm max-[359px]:-mb-12 max-[359px]:origin-top max-[359px]:scale-[0.88]">
       <motion.div
         aria-hidden="true"
-        className="absolute -left-10 top-10 -z-10 size-56 rounded-full bg-white/20 blur-3xl"
-        animate={reduce ? undefined : { x: [0, 40, 0], y: [0, 30, 0] }}
+        className="absolute left-0 top-10 -z-10 size-52 rounded-full bg-white/20 blur-3xl"
+        animate={reduce ? undefined : { x: [0, 24, 0], y: [0, 30, 0] }}
         transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
       />
       <motion.div
         aria-hidden="true"
-        className="absolute -right-8 bottom-16 -z-10 size-60 rounded-full bg-white/[0.14] blur-3xl"
-        animate={reduce ? undefined : { x: [0, -36, 0], y: [0, -30, 0] }}
+        className="absolute right-0 bottom-16 -z-10 size-52 rounded-full bg-white/[0.14] blur-3xl"
+        animate={reduce ? undefined : { x: [0, -24, 0], y: [0, -30, 0] }}
         transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      <div className={`relative mx-auto h-[35rem] w-[18.75rem] rounded-[2.9rem] p-2 backdrop-blur-xl ${GLASS}`}>
+      <div className={`relative mx-auto h-[35rem] w-[18.75rem] rounded-[2.9rem] p-2 [@media(hover:hover)]:backdrop-blur-xl ${GLASS}`}>
         <div className="relative isolate h-full overflow-hidden rounded-[2.4rem] bg-black/60 [-webkit-mask-image:-webkit-radial-gradient(white,black)] [transform:translateZ(0)]">
           {/* island: springs open for the notification */}
           <motion.div

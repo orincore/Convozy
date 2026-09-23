@@ -69,13 +69,13 @@ export default function LoginPage() {
       {/* sign-in card */}
       <div className="relative flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
-          <Link href="/" className="mb-8 flex items-center justify-center gap-2 text-foreground lg:hidden">
-            <Image src="/brand/logo-white.png" alt="" width={28} height={27} className="h-7 w-auto" />
-            <span className="text-lg font-semibold tracking-tight">Convozy</span>
+          <Link href="/" className="mb-10 flex items-center justify-center gap-3.5 text-foreground lg:hidden">
+            <Image src="/brand/logo-white.png" alt="" width={64} height={62} priority className="h-16 w-auto" />
+            <span className="font-display text-4xl font-semibold tracking-tight">Convozy</span>
           </Link>
 
           <motion.div
-            initial={reduce ? false : { opacity: 0, y: 24, filter: 'blur(8px)' }}
+            initial={reduce ? false : { opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: EASE }}
             className="rounded-[2rem] border border-white/10 bg-white/[0.03] p-1.5"
