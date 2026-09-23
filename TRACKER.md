@@ -984,7 +984,9 @@ done, verified locally, pending VPS deploy.**
 - 159/159 backend tests, clean `tsc`/lint on both apps (api: 145
   pre-existing `any`-in-test warnings, +2 for the new test files, 0 errors;
   web: 0 errors, 1 pre-existing unrelated warning).
-- Not yet deployed to the VPS.
+- Deployed via `infra/scripts/deploy.sh` (`c664938` → `5e0c08f`), the
+  `HIDE_COMMENT` migration applied cleanly (`20260926010000_hide_comment_action`),
+  health check clean, no errors in live api/worker logs post-restart.
 
 **Milestones 5–10 (require-follow-gate — now also covering ManyChat's
 "Comments Growth Tool" behavior per the rescoping above, sequences,
