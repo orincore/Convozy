@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { ContactsService } from './contacts.service';
 import { CreateCustomFieldDto } from './dto/create-custom-field.dto';
@@ -18,6 +18,7 @@ export class CustomFieldsController {
   }
 
   @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.contactsService.deleteCustomField(user.workspaceId, id);
   }

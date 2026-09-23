@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { ContactsService } from './contacts.service';
 import { ListContactsQueryDto } from './dto/list-contacts-query.dto';
@@ -24,6 +24,7 @@ export class ContactsController {
   }
 
   @Delete(':id/tags/:tagId')
+  @HttpCode(HttpStatus.NO_CONTENT)
   removeTag(@CurrentUser() user: RequestUser, @Param('id') id: string, @Param('tagId') tagId: string) {
     return this.contactsService.removeTagFromContact(user.workspaceId, id, tagId);
   }

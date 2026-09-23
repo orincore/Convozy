@@ -6,6 +6,7 @@ import {
   CircleNotch,
   WarningCircle,
   LightningSlash,
+  PencilSimple,
   Plus,
   Trash,
   ChatCircleDots,
@@ -83,6 +84,13 @@ function AutomationRow({
           onCheckedChange={(checked) => onToggle(automation.id, checked)}
           disabled={busy}
         />
+        <Link
+          href={`/app/automations/${automation.id}/edit`}
+          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label={`Edit ${automation.name}`}
+        >
+          <PencilSimple size={16} />
+        </Link>
         <button
           type="button"
           onClick={() => onDelete(automation.id)}

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import type { ActionInput, ActionType, ConditionField, TriggerMatchType } from '@/lib/api';
+import type { ActionInput, ActionType, AutomationAction, ConditionField, TriggerMatchType } from '@/lib/api';
 
 // Mirrors AutomationsService.MAX_ACTION_TREE_DEPTH on the backend (see
 // automations.service.ts) — kept in sync manually since there's no shared
@@ -131,6 +131,44 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
       order: index,
       delaySeconds: Number(n.delaySeconds) || 0,
       payload: { text: n.text.trim() },
+    };
+  });
+}
+
+/**
+ * Inverse of serializeActionSteps — turns a persisted automation's action
+ * tree (as returned by the API, branch-tagged children mixed in one array)
+ * back into the editor's local tree shape, for the edit page to prefill.
+ * `order` is already applied server-side (ACTIONS_INCLUDE sorts by it), and
+ * `.filter()` preserves that order, so THEN/ELSE branches come out sorted.
+ */
+export function deserializeActionSteps(actions: AutomationAction[]): ActionStepNode[] {
+  return actions.map((action) => {
+    if (action.type === 'CONDITION' && action.condition) {
+      return {
+        id: action.id,
+        type: 'CONDITION',
+        text: '',
+        delaySeconds: '0',
+        conditionField: action.condition.field ?? 'COMMENT_TEXT',
+        conditionMatchType: action.condition.matchType,
+        conditionKeywords: action.condition.keywords.join(', '),
+        conditionCaseSensitive: action.condition.caseSensitive ?? false,
+        then: deserializeActionSteps(action.children.filter((c) => c.branch === 'THEN')),
+        else: deserializeActionSteps(action.children.filter((c) => c.branch === 'ELSE')),
+      };
+    }
+    return {
+      id: action.id,
+      type: action.type,
+      text: action.payload?.text ?? '',
+      delaySeconds: String(action.delaySeconds ?? 0),
+      conditionField: 'COMMENT_TEXT',
+      conditionMatchType: 'CONTAINS',
+      conditionKeywords: '',
+      conditionCaseSensitive: false,
+      then: [],
+      else: [],
     };
   });
 }

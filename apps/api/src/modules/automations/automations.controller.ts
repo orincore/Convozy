@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { AutomationsService } from './automations.service';
 import { CreateAutomationDto } from './dto/create-automation.dto';
@@ -29,6 +29,7 @@ export class AutomationsController {
   }
 
   @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.automationsService.remove(user.workspaceId, id);
   }

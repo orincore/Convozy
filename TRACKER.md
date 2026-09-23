@@ -884,6 +884,53 @@ that pipeline would not.
   public API correctly 401s an invalid token (JwtAuthGuard enforced, no
   stack trace leaked).
 
+**Real production bug report, same day (user, 2026-09-23): "delete and edit
+button is not working" on `/app/automations`.**
+- **Delete, root cause**: none of the app's 5 `@Delete()` routes
+  (`automations`, `tags`, `custom-fields`, `segments`,
+  `contacts/:id/tags/:tagId`) had an explicit `@HttpCode`, so Nest's default
+  for `@Delete()` is `200`, not `204`. The frontend's shared `authFetch`
+  client only skips `res.json()` on a literal `204`; on `200` with an empty
+  body it called `res.json()` anyway, which throws a `SyntaxError` — not an
+  `ApiError` — so every delete button's catch block fell through to its
+  generic `"Could not delete the..."` fallback message even though the
+  backend had actually deleted the row. This was **not a regression from
+  Milestone 3** — same bug existed since each of these routes was first
+  written; the user was first to hit it on the automations page specifically.
+  Root-caused by reproducing live against the real local API (`curl -v`
+  showed `200 OK` with `Content-Length: 0`) rather than guessing, per the
+  session's standing "verify, don't guess" discipline. Fixed by adding
+  `@HttpCode(HttpStatus.NO_CONTENT)` to all 5 routes — the correct REST
+  status for a body-less delete anyway, not a workaround.
+- **Edit, root cause**: not a bug — there was genuinely no edit page or edit
+  button anywhere in the app (only create + delete + pause/activate toggle
+  existed). Built one: extracted the ~450-line inline builder out of
+  `automations/new/page.tsx` into a shared `components/automations/
+  automation-form.tsx` (`AutomationForm`, takes an optional `automation` prop
+  — present = edit, absent = create) so create and edit share every piece of
+  behavior (trigger rows, the recursive condition/branch tree editor, the
+  post picker) with zero duplicated logic. New route
+  `automations/[id]/edit/page.tsx`. New `deserializeActionSteps` in
+  `action-step-editor.tsx` (exact inverse of the existing
+  `serializeActionSteps`) turns a persisted branching action tree back into
+  the editor's local tree shape, handling nested THEN/ELSE recursively. The
+  template picker is hidden in edit mode (templates are a "start fresh"
+  concept), and the Instagram-account field is shown disabled with an
+  explanatory note, matching `UpdateAutomationDto`'s own documented
+  design — an automation's account is intentionally not patchable
+  (disconnect + recreate instead), not an oversight.
+- Verified end-to-end against the real local API/DB via headless
+  Playwright, including the harder case: created a real THEN/ELSE branching
+  automation via the API, opened it in the new edit page, confirmed both
+  branches' text/condition prefilled correctly, saved with no changes, and
+  confirmed the persisted tree round-tripped through Postgres byte-for-byte
+  correct (types/branches/keywords all intact). Delete verified separately —
+  created, deleted via the real UI, confirmed the row disappears with zero
+  console errors and zero error banner.
+- 155/155 backend tests still green after the `@HttpCode` change (nothing
+  asserted the old `200`), clean `tsc`/lint on both apps.
+- Not yet deployed to the VPS.
+
 **Milestones 4–10 (comments growth tool, require-follow-gate, sequences,
 broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
 webhook/endpoint exists for it, verified live against current docs)**: not
