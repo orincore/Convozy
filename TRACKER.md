@@ -1247,6 +1247,33 @@ bubble in the DM thread regardless of source format.
 Deployed via `infra/scripts/deploy.sh` (`04ce26e` → `59d393e`). Verified live:
 containers healthy, `/health` 200.
 
+**Real production bug found same day (2026-09-23), reported by user: "attached
+m4a file, no voice note received in DM."** Live worker log check found the
+real failure: `Graph API send failed: 400 ... IGApiException code 100,
+error_subcode 2018007` ("upload failed"). Root-caused by fetching the
+attachment's own R2 URL and inspecting its headers directly —
+`Content-Type: audio/x-m4a`, a non-standard MIME type some browsers report
+for `.m4a` files. `MediaService.uploadFile` was storing that raw
+browser-reported `file.mimetype` verbatim as the R2 object's Content-Type;
+Meta's fetcher rejects any Content-Type it doesn't recognize outright, even
+though the file itself was fine. `.m4a`'s canonical/IANA-registered type is
+`audio/mp4`.
+- Fix: each `SUPPORTED_MIME_TYPES` entry now carries its own
+  `canonicalContentType`, decoupled from the map key used only to validate
+  upload input — `audio/x-m4a` and `audio/mp4` both normalize to
+  `audio/mp4` when stored in R2. New regression test asserting this
+  directly. 221/221 backend tests, clean `tsc`.
+- Also ran a one-time in-place fix directly against the production R2
+  bucket (`CopyObjectCommand` with `MetadataDirective: REPLACE`, no files
+  moved or deleted) to correct the `Content-Type` header on the 5
+  already-uploaded m4a objects — confirmed via `curl -I` before/after — so
+  the user's existing automation didn't need the file re-attached.
+- Deployed via `infra/scripts/deploy.sh` (`59d393e` → `5ddf54b`). Verified
+  live: containers healthy, `/health` 200. **Not yet confirmed against a
+  real Meta send** — ask the user to re-trigger the automation so a
+  worker-log check can confirm `error_subcode 2018007` no longer occurs and
+  the voice note actually arrives.
+
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
 the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/
