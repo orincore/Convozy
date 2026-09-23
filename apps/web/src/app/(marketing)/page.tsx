@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Check } from '@phosphor-icons/react/dist/ssr';
 import { JsonLd } from '@/components/seo/json-ld';
 import { Button } from '@/components/ui/button';
 import { CtaButton } from '@/components/marketing/cta-button';
@@ -271,47 +272,71 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Pricing teaser: distinct layout family */}
-      <section className="border-t border-border bg-muted/40">
-        <div className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
-          <Reveal>
-            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+      {/* Pricing teaser: offset plan cards after Spectrum UI's Offset Tiers */}
+      <section className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
+        <div className="grid items-center gap-14 lg:grid-cols-12">
+          <Reveal className="lg:col-span-5">
+            <h2 className="font-display text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
               You built the audience. Replying to them shouldn&apos;t cost you.
             </h2>
-            <p className="mt-4 max-w-xl text-lg text-muted-foreground">
-              Most tools charge creators just to answer their own comments. We think that&apos;s
-              backwards, so the features that matter are free here. Every day you wait is
-              another pile of comments nobody answered.
+            <p className="mt-5 max-w-md text-lg text-muted-foreground">
+              Most tools charge creators just to answer their own comments. We think that&apos;s backwards, so the
+              features that matter are free here. Every day you wait is another pile of comments nobody answered.
             </p>
+            <div className="mt-9">
+              <CtaButton href="/pricing" variant="ghost">
+                See full pricing
+              </CtaButton>
+            </div>
           </Reveal>
 
-          <div className="mt-10 grid gap-6 sm:grid-cols-2 sm:max-w-2xl">
+          <div className="relative lg:col-span-7">
             <Reveal>
-              <div className="rounded-[var(--radius-card)] border border-border bg-card p-7">
-                <h3 className="text-sm font-semibold text-muted-foreground">Free</h3>
-                <p className="mt-2 text-3xl font-semibold">$0</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Real automations on your real account. Not a trial, and no card needed.
-                </p>
+              <div className="rounded-[2rem] border border-white/20 bg-white/[0.05] p-1.5 lg:mr-14">
+                <div className="relative overflow-hidden rounded-[calc(2rem-0.375rem)] bg-card p-7 shadow-[inset_0_1px_1px_rgba(255,255,255,0.12)] sm:p-9">
+                  <div aria-hidden="true" className="pointer-events-none absolute -top-20 left-1/2 h-40 w-72 -translate-x-1/2 rounded-full bg-white/[0.12] blur-3xl" />
+                  <h3 className="relative text-sm font-semibold text-muted-foreground">Free</h3>
+                  <div className="relative mt-2 flex items-baseline gap-3">
+                    <span className="font-display text-6xl font-semibold tracking-tight">$0</span>
+                    <span className="text-muted-foreground">forever, no card</span>
+                  </div>
+                  <p className="relative mt-3 max-w-sm text-muted-foreground">
+                    Real automations on your real account. Not a trial, and no card needed.
+                  </p>
+                  <ul className="relative mt-6 flex flex-col gap-2.5 text-sm">
+                    {['Every feature that works today', 'Comments, Story replies and live comments', 'Contacts, tags and templates'].map((t) => (
+                      <li key={t} className="flex items-center gap-2.5">
+                        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                          <Check size={12} weight="bold" />
+                        </span>
+                        {t}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </Reveal>
-            <Reveal delay={0.08}>
-              <div className="flex h-full flex-col rounded-[var(--radius-card)] border border-accent bg-card p-7">
-                <h3 className="text-sm font-semibold text-accent">Pro</h3>
-                <p className="mt-2 text-3xl font-semibold">When you&apos;re big</p>
-                <p className="mt-2 flex-1 text-sm text-muted-foreground">
-                  More DMs a month and more accounts, once Free isn&apos;t enough for you.
-                </p>
-                <div className="mt-5">
-                  <DonateButton variant="ghost" />
+
+            <Reveal delay={0.12}>
+              <div className="-mt-4 rounded-[2rem] border border-white/10 bg-white/[0.03] p-1.5 lg:ml-14">
+                <div className="flex flex-col gap-4 rounded-[calc(2rem-0.375rem)] bg-card p-7 shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)] sm:flex-row sm:items-center sm:justify-between sm:p-8">
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground">Pro</h3>
+                    <p className="mt-1 font-display text-2xl font-semibold tracking-tight">
+                      Finally, a partner who replies
+                    </p>
+                    <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
+                      It answers at 3am, remembers everything, and never plays hard to get. More DMs, more
+                      accounts, zero red flags.
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <DonateButton variant="ghost" />
+                  </div>
                 </div>
               </div>
             </Reveal>
           </div>
-
-          <Button asChild variant="outline" className="mt-8">
-            <Link href="/pricing">See full pricing</Link>
-          </Button>
         </div>
       </section>
 
