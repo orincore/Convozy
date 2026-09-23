@@ -5,6 +5,7 @@ import { JsonLd } from '@/components/seo/json-ld';
 import { MarketingNav } from '@/components/marketing/nav';
 import { MarketingFooter } from '@/components/marketing/footer';
 import { MarketingBackdrop } from '@/components/marketing/backdrop';
+import { ScrollBlur } from '@/components/marketing/scroll-blur';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -55,6 +56,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     <div className={`${spaceGrotesk.variable} relative`}>
       <JsonLd data={organizationJsonLd} />
       <MarketingBackdrop />
+      <ScrollBlur />
       <div className="relative z-10">
         <MarketingNav />
         <main className="pt-20">{children}</main>
