@@ -29,7 +29,13 @@ FROM node:20-slim AS runtime
 # "failed to detect the libssl/openssl version" error — found the hard way
 # on first real deploy (see TRACKER.md Phase 9). Prisma's own error message
 # names this exact fix.
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+#
+# ffmpeg: MediaService shells out to it (audio-normalizer.ts) to re-encode
+# every audio upload into a faststart AAC/m4a before it reaches R2 — a raw
+# Apple Voice Memos export fails Meta's Send API ingest otherwise. Only the
+# API process handles uploads (POST /media/upload), so this doesn't need to
+# be in worker.Dockerfile.
+RUN apt-get update -y && apt-get install -y openssl ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /repo
 ENV NODE_ENV=production

@@ -4,6 +4,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { AppException } from '../../common/utils/app-exception';
 import { AppConfig } from '../../config/configuration';
+import { normalizeAudioToM4a } from './audio-normalizer';
 
 // Meta's own hard caps for Instagram DM attachments (Attachment Upload API /
 // send-message docs) — validated at upload time so a creator gets a clear
@@ -37,11 +38,16 @@ interface MediaTypeSpec {
 // way already renders as a playable audio bubble in the DM thread, so a
 // creator's m4a/mp3/wav recording already *is* the closest thing Instagram
 // has to a voice note; there's no separate flag or endpoint to opt into.
-// audio/mpeg (mp3) is included here per an explicit user request even
-// though Meta's own audio-format table only lists aac/m4a/wav/mp4 — mp3 is
-// NOT documented as supported for Instagram (only for WhatsApp). Treated
-// like the private-reply-attachment combination elsewhere in this file:
-// shipped as best-effort, watch MessageLog for a Graph API rejection.
+//
+// Every kind:'audio' upload is re-encoded through ffmpeg to one canonical
+// faststart AAC/m4a shape regardless of source format — see
+// audio-normalizer.ts for why this is load-bearing, not just cleanup: a raw
+// Apple Voice Memos export (the single most common real "voice note"
+// source) fails Meta's ingest with a generic "upload failed" otherwise, and
+// raw mp3 is flatly rejected by Meta as an unsupported format. Accepting
+// mp3/wav/aac/m4a as *input* here and normalizing all of them means every
+// one of those genuinely works as a sent voice note, not just the
+// documented ones.
 const SUPPORTED_MIME_TYPES: Record<string, MediaTypeSpec> = {
   'image/png': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'png', canonicalContentType: 'image/png' },
   'image/jpeg': { kind: 'image', maxBytes: 8 * 1024 * 1024, extension: 'jpg', canonicalContentType: 'image/jpeg' },
@@ -51,9 +57,11 @@ const SUPPORTED_MIME_TYPES: Record<string, MediaTypeSpec> = {
   'video/webm': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'webm', canonicalContentType: 'video/webm' },
   'video/quicktime': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'mov', canonicalContentType: 'video/quicktime' },
   'video/x-msvideo': { kind: 'video', maxBytes: 25 * 1024 * 1024, extension: 'avi', canonicalContentType: 'video/x-msvideo' },
-  // m4a's canonical/IANA-registered type is audio/mp4 — "audio/x-m4a" (what
-  // Chrome/Safari actually report for the file) is accepted as upload
-  // input but never stored as the served Content-Type.
+  // Every audio entry's `extension`/`canonicalContentType` below is only
+  // used for input validation (MIME type -> accepted?, size cap) — the
+  // actual stored extension/Content-Type is always m4a/audio-mp4 once
+  // uploadFile() normalizes the buffer through ffmpeg, regardless of which
+  // of these keys matched.
   'audio/aac': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'aac', canonicalContentType: 'audio/aac' },
   'audio/mp4': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a', canonicalContentType: 'audio/mp4' },
   'audio/x-m4a': { kind: 'audio', maxBytes: 25 * 1024 * 1024, extension: 'm4a', canonicalContentType: 'audio/mp4' },
@@ -113,7 +121,7 @@ export class MediaService {
     if (!spec) {
       throw new AppException(
         'UNSUPPORTED_MEDIA_TYPE',
-        `"${file.mimetype}" isn't a supported file type. Supported: PNG/JPEG/GIF images, MP4/OGG/WEBM/MOV/AVI video, AAC/M4A/WAV audio, or PDF.`,
+        `"${file.mimetype}" isn't a supported file type. Supported: PNG/JPEG/GIF images, MP4/OGG/WEBM/MOV/AVI video, AAC/M4A/WAV/MP3 audio, or PDF.`,
       );
     }
     if (file.size > spec.maxBytes) {
@@ -123,15 +131,35 @@ export class MediaService {
       );
     }
 
-    const key = `workspaces/${workspaceId}/${spec.kind}/${randomUUID()}.${spec.extension}`;
+    let body = file.buffer;
+    let extension = spec.extension;
+    let contentType = spec.canonicalContentType;
+
+    if (spec.kind === 'audio') {
+      try {
+        body = await normalizeAudioToM4a(file.buffer);
+      } catch (err) {
+        this.logger.error(`Audio normalization failed for workspace ${workspaceId}: ${(err as Error).message}`);
+        throw new AppException(
+          'AUDIO_PROCESSING_FAILED',
+          "Couldn't process this audio file. Try a different recording or format.",
+        );
+      }
+      // Normalization always produces the same canonical faststart AAC/m4a
+      // shape, regardless of what format the creator uploaded.
+      extension = 'm4a';
+      contentType = 'audio/mp4';
+    }
+
+    const key = `workspaces/${workspaceId}/${spec.kind}/${randomUUID()}.${extension}`;
 
     try {
       await this.client.send(
         new PutObjectCommand({
           Bucket: r2.bucketName,
           Key: key,
-          Body: file.buffer,
-          ContentType: spec.canonicalContentType,
+          Body: body,
+          ContentType: contentType,
         }),
       );
     } catch (err) {
@@ -142,7 +170,10 @@ export class MediaService {
     return {
       url: `${r2.publicUrlBase.replace(/\/$/, '')}/${key}`,
       type: spec.kind,
-      sizeBytes: file.size,
+      // Audio's actual stored size differs from the upload (re-encoded);
+      // every other kind is stored byte-for-byte, so the declared size is
+      // already accurate and avoids relying on the mock buffer in tests.
+      sizeBytes: spec.kind === 'audio' ? body.length : file.size,
       filename: file.originalname,
     };
   }

@@ -31,6 +31,11 @@ jest.mock('@aws-sdk/client-s3', () => ({
   PutObjectCommand: jest.fn().mockImplementation((input) => input),
 }));
 
+const normalizeAudioToM4aMock = jest.fn().mockResolvedValue(Buffer.from('normalized-audio-bytes'));
+jest.mock('./audio-normalizer', () => ({
+  normalizeAudioToM4a: (...args: unknown[]) => normalizeAudioToM4aMock(...args),
+}));
+
 import { MediaService } from './media.service';
 import { AppException } from '../../common/utils/app-exception';
 
@@ -65,6 +70,8 @@ function makeFile(overrides: Record<string, unknown> = {}) {
 describe('MediaService.uploadFile', () => {
   beforeEach(() => {
     sendMock.mockClear();
+    normalizeAudioToM4aMock.mockClear();
+    normalizeAudioToM4aMock.mockResolvedValue(Buffer.from('normalized-audio-bytes'));
   });
 
   it('uploads a supported image under workspaces/<id>/image/<uuid>.png and returns its public URL', async () => {
@@ -111,7 +118,10 @@ describe('MediaService.uploadFile', () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it('accepts audio/mpeg (mp3) as a voice-note-capable audio upload', async () => {
+  it('accepts audio/mpeg (mp3) as a voice-note-capable audio upload, normalized to m4a', async () => {
+    // mp3 isn't itself a Meta-documented format (confirmed via a live "format
+    // not supported" rejection, error_subcode 2534080) — normalizeAudioToM4a
+    // is what actually makes it work as a sent voice note.
     const service = new MediaService(makeConfigService());
 
     const result = await service.uploadFile(
@@ -119,16 +129,21 @@ describe('MediaService.uploadFile', () => {
       makeFile({ mimetype: 'audio/mpeg', originalname: 'voice-note.mp3', size: 2 * 1024 * 1024 }),
     );
 
+    expect(normalizeAudioToM4aMock).toHaveBeenCalledTimes(1);
     const putInput = sendMock.mock.calls[0][0];
-    expect(putInput.Key).toMatch(/^workspaces\/workspace-1\/audio\/[0-9a-f-]+\.mp3$/);
+    expect(putInput.Key).toMatch(/^workspaces\/workspace-1\/audio\/[0-9a-f-]+\.m4a$/);
+    expect(putInput.ContentType).toBe('audio/mp4');
+    expect(putInput.Body).toEqual(Buffer.from('normalized-audio-bytes'));
     expect(result.type).toBe('audio');
   });
 
-  it('normalizes the R2 Content-Type to the canonical MIME type regardless of what the browser reported (audio/x-m4a -> audio/mp4)', async () => {
-    // Regression test: Chrome/Safari report .m4a uploads as "audio/x-m4a",
-    // a non-standard type Meta's Graph API rejects when fetching the
-    // attachment URL (fails the whole DM send with a generic "upload
-    // failed", error_subcode 2018007) even though the file itself is fine.
+  it('normalizes every audio upload to canonical m4a/audio-mp4 regardless of the source MIME type (audio/x-m4a)', async () => {
+    // Regression test: Chrome/Safari report .m4a uploads as "audio/x-m4a", a
+    // non-standard type; separately, a raw Apple Voice Memos export fails
+    // Meta's Graph API ingest outright (generic "upload failed",
+    // error_subcode 2018007) unless re-encoded with a faststart moov atom —
+    // reproduced live against production and fixed by always routing kind
+    // 'audio' uploads through normalizeAudioToM4a.
     const service = new MediaService(makeConfigService());
 
     await service.uploadFile(
@@ -138,6 +153,17 @@ describe('MediaService.uploadFile', () => {
 
     const putInput = sendMock.mock.calls[0][0];
     expect(putInput.ContentType).toBe('audio/mp4');
+    expect(putInput.Key).toMatch(/\.m4a$/);
+  });
+
+  it('wraps an ffmpeg normalization failure in an AppException instead of uploading a broken file', async () => {
+    normalizeAudioToM4aMock.mockRejectedValueOnce(new Error('ffmpeg audio normalization failed: exit code 1'));
+    const service = new MediaService(makeConfigService());
+
+    await expect(
+      service.uploadFile('workspace-1', makeFile({ mimetype: 'audio/wav', originalname: 'note.wav' })),
+    ).rejects.toThrow(AppException);
+    expect(sendMock).not.toHaveBeenCalled();
   });
 
   it('allows a video up to its own larger 25MB cap', async () => {
