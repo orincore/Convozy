@@ -1184,6 +1184,54 @@ notes, and other things" — DM messages were text/link-only.**
   through the live API, confirmed publicly reachable over HTTPS at its
   R2 URL.
 
+**Milestone 6b — Postback button media replies + merge-tag picker** ✅ deployed
+and verified live (2026-09-23):
+- User feedback: the button-tap reply (`unlockedText`/`lockedText`, plain
+  text only) needed the same media capability just built for regular
+  SEND_DM messages, plus personalization was stuck at a hand-typed
+  `{{username}}` with no way to discover or insert other fields.
+- `ActionButtonDto` gains `unlockedMedia`/`lockedMedia` (`ActionMediaDto`,
+  reused from the SEND_DM payload). `validateActionTree` requires exactly
+  one of text/media per reply (and per locked reply when `requireFollow`
+  is set) — same mutual-exclusivity reasoning as `payload.text`/`payload.media`.
+- Merge tags generalized beyond `{{username}}`: `{{full_name}}` (live,
+  consent-gated Graph API profile fetch — `InstagramService.fetchSenderProfile`,
+  fails closed to empty string like `checkIsFollowing`) and
+  `{{field.<key>}}` for every workspace custom field (contacts module,
+  `ContactsService.findByIgScopedId`). `AutomationsService.renderMergeTags`
+  only makes a live/DB lookup when the template actually references a tag
+  needing one — a plain-text message with no tags costs nothing extra.
+  This also **fixes a pre-existing gap**: postback replies previously sent
+  raw unrendered text (no `{{username}}` substitution at all); they now go
+  through the same renderer as regular SEND_DM messages.
+- Frontend: `MediaAttachmentEditor` generalized to take `media`/`onAttach`/
+  `onRemove` instead of being tied to the step's own node, reused for both
+  button reply slots. New `MergeTagBar` — tap-to-insert chips (not just
+  `{{username}}` typed by hand) above every message/reply textarea, sourced
+  from the built-in tags plus a per-workspace fetch of custom fields;
+  insertion is caret-aware via DOM id lookup (`document.getElementById`)
+  since these components render inside `.map()`, where hooks/refs can't be
+  used per-item.
+- 218/218 backend tests (17 new: `fetchSenderProfile`, `findByIgScopedId`,
+  4 merge-tag rendering cases, button media in `resolvePostback`, 5
+  write-time validation cases for the new text/media button rules), clean
+  `tsc`/lint on both apps, clean `next build`.
+- Verified end-to-end locally with Playwright against the real API + a real
+  R2 bucket: merge-tag chips (including the dynamic custom-field chip)
+  insert at the caret; a POSTBACK button's unlocked/locked replies each
+  independently support text-with-chips or a real uploaded media file, with
+  `requireFollow` correctly revealing the locked slot's own controls;
+  full create → persist → edit-page-prefill → resave round trip confirmed
+  via direct API inspection of the persisted `unlockedMedia`/`lockedMedia`
+  payload; zero browser console errors throughout.
+- Deployed via manual image rebuild + restart on the VPS (`666a33b` →
+  `2081768`) — no Prisma migration needed (`Action.payload` is already a
+  `Json?` column, so the new button fields need no schema change). Verified
+  live: containers healthy, `/health` 200, and a real authenticated request
+  against the disposable production test account confirmed the new
+  `ContactsModule` wiring into `AutomationsModule` boots cleanly (no DI
+  errors) and `/custom-fields`/`/automations` respond 200.
+
 **Milestones 7–10 (sequences, broadcasts, external-request step, analytics)**:
 not started, full detail in the plan file (needs a light update to reflect
 the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/
