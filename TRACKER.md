@@ -935,12 +935,64 @@ button is not working" on `/app/automations`.**
   production API (`POST /tags` + `DELETE /tags/:id`) returned a genuine
   `204 No Content`, not the old `200`.
 
-**Milestones 4–10 (comments growth tool, require-follow-gate, sequences,
+**Milestone 4 — Comment Moderation (rescoped from "Comments Growth Tool"): ✅
+done, verified locally, pending VPS deploy.**
+- **Rescoping decision (user-confirmed 2026-09-23, before any code was
+  written):** researched what ManyChat's "Comments Growth Tool" actually
+  does (not just the name) — it's comment automation (already have) + an
+  opt-in button + a require-follow gate ("follow us to get the link"). That
+  is Milestone 6 (require-follow gating) wearing a marketing name, not a new
+  capability. Folded it into Milestone 6 instead of building it twice.
+  Auto-follow-back stays dropped (confirmed earlier: no Graph API write
+  endpoint exists for it anywhere in Meta's docs). What Milestone 4 actually
+  builds instead: **Comment Moderation** — Meta's real, separate
+  `POST /<COMMENT_ID>?hide=true` capability (confirmed via live Meta docs
+  search, `ig-comment` reference), exposed as a new automation action so a
+  creator can auto-hide spam/off-topic comments on trigger match.
+- Schema (additive migration `20260926010000_hide_comment_action`):
+  `ActionType.HIDE_COMMENT`. No new model — reuses the existing
+  Action/dispatch/MessageLog pipeline exactly like REPLY_COMMENT/SEND_DM do.
+- Backend: `ActionDto.payload` now also optional for `HIDE_COMMENT` (no
+  message content of its own, same as `CONDITION`). `AutomationsService
+  .dispatchAction` skips `HIDE_COMMENT` for STORY_REPLY/DM-sourced events
+  (no comment to hide there — identical guard pattern to the existing
+  REPLY_COMMENT skip) and builds a `content: {}` job. `MessagingService
+  .callGraphApi` sends `POST /<recipientId>?hide=true` — a query param, not
+  a JSON body field (verified against Meta's current docs, not guessed).
+  4 new tests (2 dispatch, 2 messaging-service request-shape/rejection).
+- Frontend: `HIDE_COMMENT` added to the action-step editor's step-type
+  picker; the message textarea is replaced with a plain explanatory note for
+  this step type (no text to write — nothing was sent). `serializeAction
+  Steps`/`deserializeActionSteps`/`validateActionSteps` all updated to treat
+  `HIDE_COMMENT` as payload-less, alongside `CONDITION`.
+- **Explicitly out of scope, documented per CLAUDE.md §14 (not silently
+  missing):** no manual "unhide" button or moderation-inbox UI — this
+  milestone is auto-hide-via-automation only. A full comment-moderation
+  dashboard (browse/unhide previously-hidden comments) is a different,
+  separably-scoped feature not requested yet.
+- Verified end-to-end via headless Playwright against the real local
+  API/DB: created a HIDE_COMMENT automation through the real builder UI
+  (step-type switch correctly hides the message field), confirmed it
+  persists with `payload: null`, confirmed the edit page prefills and
+  round-trips it correctly, and cleaned up via the real delete flow (204).
+  The actual Graph API request shape (`POST .../<id>?hide=true`) is proven
+  correct at the unit level (mocked fetch asserts the exact URL) rather
+  than against a live account, matching how REPLY_COMMENT/SEND_DM were
+  originally verified when first built — the local test Instagram account
+  only has a dummy token, so a live Graph call would only prove the
+  (expected) auth failure, not add confidence about request correctness.
+- 159/159 backend tests, clean `tsc`/lint on both apps (api: 145
+  pre-existing `any`-in-test warnings, +2 for the new test files, 0 errors;
+  web: 0 errors, 1 pre-existing unrelated warning).
+- Not yet deployed to the VPS.
+
+**Milestones 5–10 (require-follow-gate — now also covering ManyChat's
+"Comments Growth Tool" behavior per the rescoping above, sequences,
 broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
 webhook/endpoint exists for it, verified live against current docs)**: not
-started, full detail in the plan file. Building **one at a time**, next up
-is Milestone 4 (Comments Growth Tool) once the user confirms readiness to
-continue.
+started, full detail in the plan file (needs a light update to reflect the
+Milestone 4/6 rescoping). Building **one at a time**, next up is Milestone 6
+(require-follow gating) once the user confirms readiness to continue.
 
 ## Phase 6 — AI features
 

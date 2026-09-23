@@ -115,7 +115,7 @@ export const instagramApi = {
 
 export type TriggerSource = 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT';
 export type TriggerMatchType = 'EXACT' | 'CONTAINS' | 'REGEX' | 'AI_INTENT';
-export type ActionType = 'SEND_DM' | 'REPLY_COMMENT' | 'SEND_AI_REPLY' | 'CONDITION';
+export type ActionType = 'SEND_DM' | 'REPLY_COMMENT' | 'SEND_AI_REPLY' | 'CONDITION' | 'HIDE_COMMENT';
 export type AutomationStatus = 'ACTIVE' | 'PAUSED' | 'DRAFT';
 export type AutomationScopeType = 'ALL_POSTS' | 'SPECIFIC_POSTS';
 export type ActionBranch = 'THEN' | 'ELSE';

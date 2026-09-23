@@ -57,9 +57,9 @@ export class ActionDto {
   @Min(0)
   delaySeconds?: number;
 
-  // Required for every action type except CONDITION, which has no message
-  // payload of its own.
-  @ValidateIf((o: ActionDto) => o.type !== ActionType.CONDITION)
+  // Required for every action type except CONDITION and HIDE_COMMENT, which
+  // carry no message payload of their own.
+  @ValidateIf((o: ActionDto) => o.type !== ActionType.CONDITION && o.type !== ActionType.HIDE_COMMENT)
   @ValidateNested()
   @Type(() => ActionPayloadDto)
   payload?: ActionPayloadDto;

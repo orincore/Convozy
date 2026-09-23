@@ -10,6 +10,7 @@ import {
   Plus,
   Trash,
   ChatCircleDots,
+  EyeSlash,
   PaperPlaneTilt,
   Sparkle,
   GitBranch,
@@ -23,6 +24,7 @@ const ACTION_ICON: Record<Automation['actions'][number]['type'], typeof ChatCirc
   REPLY_COMMENT: ChatCircleDots,
   SEND_AI_REPLY: Sparkle,
   CONDITION: GitBranch,
+  HIDE_COMMENT: EyeSlash,
 };
 
 function ActionSummary({ automation }: { automation: Automation }) {

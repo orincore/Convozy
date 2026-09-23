@@ -488,6 +488,73 @@ describe('AutomationsService.matchCommentEvent', () => {
 
     expect(messageSendQueue.add).not.toHaveBeenCalled();
   });
+
+  it('dispatches a HIDE_COMMENT action with the comment id and no payload text', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ externalEventId: 'ig-comment-42' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.HIDE_COMMENT,
+            order: 0,
+            delaySeconds: 0,
+            payload: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        actionType: ActionType.HIDE_COMMENT,
+        recipientId: 'ig-comment-42',
+        recipientType: 'comment',
+        content: {},
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('skips a HIDE_COMMENT action on a story-reply-sourced event — there is no comment to hide', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({ source: TriggerSource.STORY_REPLY, text: 'love it' }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.STORY_REPLY,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: ['love'],
+            caseSensitive: false,
+          },
+        ],
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.HIDE_COMMENT,
+            order: 0,
+            delaySeconds: 0,
+            payload: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
 });
 
 describe('AutomationsService CRUD ownership', () => {

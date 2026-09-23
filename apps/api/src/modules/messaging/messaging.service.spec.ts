@@ -166,6 +166,50 @@ describe('MessagingService.send', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('hides a comment for HIDE_COMMENT via a hide=true query param, not a JSON body field', async () => {
+    const { service, prisma } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true }) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'comment-123',
+        recipientType: 'comment',
+        actionType: ActionType.HIDE_COMMENT,
+        content: {},
+      }),
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://graph.instagram.com/v21.0/comment-123?hide=true',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({}) }),
+    );
+    expect(prisma.messageLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: MessageLogStatus.SENT }) }),
+    );
+  });
+
+  it('rejects HIDE_COMMENT for a conversation-sourced (non-comment) recipient rather than sending a malformed request', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn() as any;
+
+    await expect(
+      service.send(
+        makeJob({
+          workspaceId: 'workspace-1',
+          instagramAccountId: 'account-1',
+          recipientId: 'ig-scoped-user-1',
+          recipientType: 'user',
+          actionType: ActionType.HIDE_COMMENT,
+          content: {},
+        }),
+      ),
+    ).rejects.toThrow(/requires a comment-sourced event/);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('appends buttons as plain text links instead of guessing at an unverified template shape', async () => {
     const { service } = makeService();
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;

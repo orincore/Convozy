@@ -155,6 +155,16 @@ export class MessagingService {
       return this.postGraphApi(`${data.recipientId}/replies`, { message: text }, credentials.accessToken, version);
     }
 
+    if (data.actionType === ActionType.HIDE_COMMENT) {
+      if (data.recipientType !== 'comment') {
+        throw new Error('HIDE_COMMENT requires a comment-sourced event, not a conversation-sourced one');
+      }
+      // Comment Moderation: POST /<IG_COMMENT_ID>?hide=true — a query
+      // param, not a JSON body field (confirmed against Meta's current
+      // ig-comment reference docs). No text content of its own.
+      return this.postGraphApi(`${data.recipientId}?hide=true`, {}, credentials.accessToken, version);
+    }
+
     // SEND_AI_REPLY never reaches here — AutomationsService routes it to the
     // AI processing queue instead (see dispatchAction).
     throw new Error(`MessagingService cannot send actionType ${data.actionType}`);

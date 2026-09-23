@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowBendDownRight, Plus, Trash } from '@phosphor-icons/react';
+import { ArrowBendDownRight, EyeSlash, Plus, Trash } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,8 +16,13 @@ const MAX_ACTION_TREE_DEPTH = 5;
 const STEP_TYPES: { value: ActionType; label: string; hint: string }[] = [
   { value: 'SEND_DM', label: 'Send a DM', hint: 'Private reply / message' },
   { value: 'REPLY_COMMENT', label: 'Reply publicly', hint: 'Public reply under the comment (comments only)' },
+  { value: 'HIDE_COMMENT', label: 'Hide comment', hint: 'Hide the triggering comment (comments only, no message sent)' },
   { value: 'CONDITION', label: 'If / else', hint: 'Branch based on the comment text or sender' },
 ];
+
+// Types that carry no message payload of their own — mirrors ActionDto's
+// @ValidateIf on the backend (CONDITION and HIDE_COMMENT both skip payload).
+const NO_PAYLOAD_TYPES: ActionType[] = ['CONDITION', 'HIDE_COMMENT'];
 
 const CONDITION_FIELDS: { value: ConditionField; label: string }[] = [
   { value: 'COMMENT_TEXT', label: 'Comment text' },
@@ -126,6 +131,13 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
         },
       };
     }
+    if (n.type === 'HIDE_COMMENT') {
+      return {
+        type: n.type,
+        order: index,
+        delaySeconds: Number(n.delaySeconds) || 0,
+      };
+    }
     return {
       type: n.type,
       order: index,
@@ -201,7 +213,7 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
       if (thenError) return thenError;
       const elseError = validateActionSteps(node.else, depth + 1);
       if (elseError) return elseError;
-    } else if (node.text.trim() === '') {
+    } else if (!NO_PAYLOAD_TYPES.includes(node.type) && node.text.trim() === '') {
       return 'Every action needs a message.';
     }
   }
@@ -414,6 +426,12 @@ export function ActionStepEditor({
                 </div>
               </div>
             </>
+          ) : node.type === 'HIDE_COMMENT' ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <EyeSlash size={13} />
+              Hides the comment that triggered this automation — no message is sent. Only applies to comment
+              triggers; skipped for story replies and DMs.
+            </p>
           ) : (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">

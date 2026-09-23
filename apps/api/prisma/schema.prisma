@@ -228,6 +228,10 @@ enum ActionType {
   REPLY_COMMENT
   SEND_AI_REPLY
   CONDITION
+  // Comment moderation (Milestone 4) — POST /<COMMENT_ID>?hide=true. Only
+  // meaningful for comment-sourced triggers (COMMENT/LIVE_COMMENT); skipped
+  // at dispatch time for STORY_REPLY/DM, same pattern as REPLY_COMMENT.
+  HIDE_COMMENT
 }
 
 enum ActionBranch {

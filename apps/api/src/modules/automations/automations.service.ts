@@ -530,25 +530,46 @@ export class AutomationsService {
       );
       return;
     }
+    if (isConversationSourced && action.type === ActionType.HIDE_COMMENT) {
+      // Same reasoning as REPLY_COMMENT above — there's no comment to hide
+      // for a DM/story reply source.
+      this.logger.warn(
+        `Skipping HIDE_COMMENT action ${action.id}: source ${commentEvent.source} has no comment to hide`,
+      );
+      return;
+    }
 
-    const payload = action.payload as unknown as ActionPayloadDto;
-    const jobData: MessageSendJobData = {
-      workspaceId: commentEvent.workspaceId,
-      instagramAccountId: commentEvent.instagramAccountId,
-      // Comment-sourced events (COMMENT/LIVE_COMMENT): Meta's Private/Public
-      // Reply APIs key off the comment ID itself. Conversation-sourced
-      // events (STORY_REPLY, and DM once its webhook mapping exists): the
-      // reply goes to the sender's IG-scoped user ID instead — that's what
-      // WebhooksController stored in fromUsername for these sources (see
-      // its mapMessagingEventToJobData). See MessageSendJobData /
-      // MessagingService.callGraphApi for the two different request shapes
-      // this drives.
-      recipientId: isConversationSourced ? commentEvent.fromUsername : commentEvent.externalEventId,
-      recipientType: isConversationSourced ? 'user' : 'comment',
-      actionType: action.type,
-      content: { text: this.renderText(payload.text, commentEvent), buttons: payload.buttons },
-      commentEventId: commentEvent.id,
-    };
+    const jobData: MessageSendJobData =
+      action.type === ActionType.HIDE_COMMENT
+        ? {
+            workspaceId: commentEvent.workspaceId,
+            instagramAccountId: commentEvent.instagramAccountId,
+            recipientId: commentEvent.externalEventId,
+            recipientType: 'comment',
+            actionType: action.type,
+            content: {},
+            commentEventId: commentEvent.id,
+          }
+        : {
+            workspaceId: commentEvent.workspaceId,
+            instagramAccountId: commentEvent.instagramAccountId,
+            // Comment-sourced events (COMMENT/LIVE_COMMENT): Meta's Private/Public
+            // Reply APIs key off the comment ID itself. Conversation-sourced
+            // events (STORY_REPLY, and DM once its webhook mapping exists): the
+            // reply goes to the sender's IG-scoped user ID instead — that's what
+            // WebhooksController stored in fromUsername for these sources (see
+            // its mapMessagingEventToJobData). See MessageSendJobData /
+            // MessagingService.callGraphApi for the two different request shapes
+            // this drives.
+            recipientId: isConversationSourced ? commentEvent.fromUsername : commentEvent.externalEventId,
+            recipientType: isConversationSourced ? 'user' : 'comment',
+            actionType: action.type,
+            content: {
+              text: this.renderText((action.payload as unknown as ActionPayloadDto).text, commentEvent),
+              buttons: (action.payload as unknown as ActionPayloadDto).buttons,
+            },
+            commentEventId: commentEvent.id,
+          };
     await this.messageSendQueue.add('send', jobData, { delay, jobId });
   }
 
