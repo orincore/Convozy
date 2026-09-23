@@ -929,7 +929,11 @@ button is not working" on `/app/automations`.**
   console errors and zero error banner.
 - 155/155 backend tests still green after the `@HttpCode` change (nothing
   asserted the old `200`), clean `tsc`/lint on both apps.
-- Not yet deployed to the VPS.
+- Deployed via `infra/scripts/deploy.sh` (`cfb5c1e` → `c664938`), health
+  check clean, all 5 `DELETE` routes confirmed registered in live worker
+  logs, and a real create-then-delete round-trip against the live
+  production API (`POST /tags` + `DELETE /tags/:id`) returned a genuine
+  `204 No Content`, not the old `200`.
 
 **Milestones 4–10 (comments growth tool, require-follow-gate, sequences,
 broadcasts, external-request step, analytics; Follow-to-DM dropped — no Meta
