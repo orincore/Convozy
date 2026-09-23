@@ -611,6 +611,42 @@ export class InstagramService {
     }
   }
 
+  /**
+   * Fetches the sender's display name + username for merge-tag rendering
+   * ({{full_name}}, and {{username}} when the triggering event didn't
+   * already carry one — DM/postback senders don't, see
+   * WebhookEventsProcessor's fromUsername comment). Same endpoint, same
+   * consent requirement, and same fail-closed contract as checkIsFollowing
+   * above (any failure returns nulls, which AutomationsService.renderMergeTags
+   * then renders as empty strings rather than blocking the send).
+   */
+  async fetchSenderProfile(instagramAccountId: string, igScopedId: string): Promise<{ name: string | null; username: string | null }> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return { name: null, username: null };
+    }
+
+    const version = this.configService.get('meta', { infer: true }).graphApiVersion;
+    const params = new URLSearchParams({
+      fields: 'name,username',
+      access_token: credentials.accessToken,
+    });
+
+    try {
+      const res = await fetch(`https://graph.instagram.com/${version}/${igScopedId}?${params.toString()}`);
+      if (!res.ok) {
+        const body = await res.text();
+        this.logger.warn(`Sender profile fetch failed for ${igScopedId} on account ${instagramAccountId}: ${res.status} ${body}`);
+        return { name: null, username: null };
+      }
+      const json = (await res.json()) as { name?: string | null; username?: string | null };
+      return { name: json.name ?? null, username: json.username ?? null };
+    } catch (err) {
+      this.logger.warn(`Sender profile fetch threw for ${igScopedId} on account ${instagramAccountId}: ${(err as Error).message}`);
+      return { name: null, username: null };
+    }
+  }
+
   private requireInstagramAppId(): string {
     const meta = this.configService.get('meta', { infer: true });
     if (!meta.instagramAppId) {

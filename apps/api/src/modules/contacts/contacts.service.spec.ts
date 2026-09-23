@@ -104,6 +104,35 @@ describe('ContactsService.recordInbound', () => {
   });
 });
 
+describe('ContactsService.findByIgScopedId', () => {
+  it('looks up a Contact with its field values, keyed by workspace+account+igScopedId', async () => {
+    const { service, prisma } = makeService();
+    prisma.contact.findUnique.mockResolvedValue({ id: 'contact-1', fieldValues: [] });
+
+    const result = await service.findByIgScopedId('workspace-1', 'account-1', 'ig-scoped-1');
+
+    expect(result).toEqual({ id: 'contact-1', fieldValues: [] });
+    expect(prisma.contact.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          workspaceId_instagramAccountId_igScopedId: {
+            workspaceId: 'workspace-1',
+            instagramAccountId: 'account-1',
+            igScopedId: 'ig-scoped-1',
+          },
+        },
+      }),
+    );
+  });
+
+  it('returns null (not a throw) when no Contact exists yet', async () => {
+    const { service, prisma } = makeService();
+    prisma.contact.findUnique.mockResolvedValue(null);
+
+    await expect(service.findByIgScopedId('workspace-1', 'account-1', 'unknown')).resolves.toBeNull();
+  });
+});
+
 describe('ContactsService tags', () => {
   it('adds a tag to a contact only after verifying both belong to the caller workspace', async () => {
     const { service, prisma } = makeService();

@@ -122,6 +122,23 @@ export class ContactsService {
     return contact;
   }
 
+  /**
+   * Looked up by AutomationsService.renderMergeTags for {{field.<key>}}
+   * merge tags — returns null (not a throw) when no Contact row exists yet
+   * for this sender, since a merge tag renders as an empty string rather
+   * than blocking the send.
+   */
+  async findByIgScopedId(
+    workspaceId: string,
+    instagramAccountId: string,
+    igScopedId: string,
+  ): Promise<ContactWithRelations | null> {
+    return this.prisma.contact.findUnique({
+      where: { workspaceId_instagramAccountId_igScopedId: { workspaceId, instagramAccountId, igScopedId } },
+      include: { tags: { include: { tag: true } }, fieldValues: { include: { customField: true } } },
+    });
+  }
+
   async addTagToContact(workspaceId: string, contactId: string, tagId: string): Promise<void> {
     await this.getOwnedContact(workspaceId, contactId);
     await this.getOwnedTag(workspaceId, tagId);

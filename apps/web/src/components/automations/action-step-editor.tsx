@@ -29,6 +29,7 @@ import {
   type ActionType,
   type AutomationAction,
   type ConditionField,
+  type CustomField,
   type MediaKind,
   type TriggerMatchType,
 } from '@/lib/api';
@@ -47,6 +48,65 @@ const MEDIA_ICON: Record<MediaKind, typeof ImageIcon> = {
 // automations.service.ts) — kept in sync manually since there's no shared
 // constants package between apps/api and apps/web yet.
 const MAX_ACTION_TREE_DEPTH = 5;
+
+// The two built-in merge tags every message/reply field supports, mirroring
+// AutomationsService.renderMergeTags on the backend. Workspace custom
+// fields (contacts module) are appended per-instance as {{field.<key>}} —
+// see buildMergeFieldOptions below.
+const BUILTIN_MERGE_FIELDS: { tag: string; label: string }[] = [
+  { tag: 'username', label: 'Username' },
+  { tag: 'full_name', label: 'Full name' },
+];
+
+interface MergeFieldOption {
+  tag: string;
+  label: string;
+}
+
+function buildMergeFieldOptions(customFields: CustomField[]): MergeFieldOption[] {
+  return [...BUILTIN_MERGE_FIELDS, ...customFields.map((f) => ({ tag: `field.${f.key}`, label: f.label }))];
+}
+
+// Inserts {{tag}} at the caret position of the textarea identified by
+// `elementId` (looked up by DOM id rather than a React ref, since every
+// call site here renders inside an array .map() where hooks can't be
+// called) and updates the field's controlled value through `onChange`.
+// Falls back to appending at the end if the element can't be found (e.g.
+// autofill/SSR edge cases).
+function insertMergeTag(elementId: string, value: string, onChange: (next: string) => void, tag: string): void {
+  const token = `{{${tag}}}`;
+  const el = typeof document !== 'undefined' ? (document.getElementById(elementId) as HTMLTextAreaElement | null) : null;
+  if (!el) {
+    onChange(value + token);
+    return;
+  }
+  const start = el.selectionStart ?? value.length;
+  const end = el.selectionEnd ?? value.length;
+  onChange(value.slice(0, start) + token + value.slice(end));
+  requestAnimationFrame(() => {
+    el.focus();
+    const pos = start + token.length;
+    el.setSelectionRange(pos, pos);
+  });
+}
+
+function MergeTagBar({ options, onInsert }: { options: MergeFieldOption[]; onInsert: (tag: string) => void }) {
+  if (options.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((opt) => (
+        <button
+          key={opt.tag}
+          type="button"
+          onClick={() => onInsert(opt.tag)}
+          className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-accent/50 hover:text-foreground"
+        >
+          + {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const STEP_TYPES: { value: ActionType; label: string; hint: string }[] = [
   { value: 'SEND_DM', label: 'Send a DM', hint: 'Private reply / message' },
@@ -80,7 +140,9 @@ export interface ButtonNode {
   url: string;
   requireFollow: boolean;
   unlockedText: string;
+  unlockedMedia: MediaNode | null;
   lockedText: string;
+  lockedMedia: MediaNode | null;
 }
 
 // A media attachment picked in the builder. Mutually exclusive with
@@ -120,7 +182,17 @@ function makeId(): string {
 }
 
 export function emptyButton(): ButtonNode {
-  return { id: makeId(), title: '', type: 'WEB_URL', url: '', requireFollow: false, unlockedText: '', lockedText: '' };
+  return {
+    id: makeId(),
+    title: '',
+    type: 'WEB_URL',
+    url: '',
+    requireFollow: false,
+    unlockedText: '',
+    unlockedMedia: null,
+    lockedText: '',
+    lockedMedia: null,
+  };
 }
 
 export function emptyActionStep(type: ActionType = 'SEND_DM'): ActionStepNode {
@@ -221,8 +293,13 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
                       title: b.title.trim(),
                       type: b.type,
                       requireFollow: b.requireFollow,
-                      unlockedText: b.unlockedText.trim(),
-                      lockedText: b.requireFollow ? b.lockedText.trim() : undefined,
+                      // Text and media are mutually exclusive per reply —
+                      // mirrors payload.text/payload.media above.
+                      unlockedText: b.unlockedMedia ? undefined : b.unlockedText.trim(),
+                      unlockedMedia: b.unlockedMedia ? { type: b.unlockedMedia.type, url: b.unlockedMedia.url } : undefined,
+                      lockedText: b.requireFollow && !b.lockedMedia ? b.lockedText.trim() : undefined,
+                      lockedMedia:
+                        b.requireFollow && b.lockedMedia ? { type: b.lockedMedia.type, url: b.lockedMedia.url } : undefined,
                     }
                   : { title: b.title.trim(), type: b.type, url: b.url.trim() },
               )
@@ -231,6 +308,13 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
       },
     };
   });
+}
+
+// Only `type`/`url` are persisted server-side (ActionMediaDto) —
+// filename/size are upload-time-only presentation details, so a loaded
+// attachment's preview derives a filename from the URL and shows no size.
+function toMediaNode(media: { type: MediaKind; url: string } | undefined | null): MediaNode | null {
+  return media ? { type: media.type, url: media.url, filename: media.url.split('/').pop() ?? 'file', sizeBytes: 0 } : null;
 }
 
 /**
@@ -270,20 +354,11 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         url: b.url ?? '',
         requireFollow: b.requireFollow ?? false,
         unlockedText: b.unlockedText ?? '',
+        unlockedMedia: toMediaNode(b.unlockedMedia),
         lockedText: b.lockedText ?? '',
+        lockedMedia: toMediaNode(b.lockedMedia),
       })),
-      // Only `type`/`url` are persisted server-side (ActionMediaDto) —
-      // filename/size are upload-time-only presentation details, so the
-      // preview derives a filename from the URL and shows no size on an
-      // already-saved attachment.
-      media: action.payload?.media
-        ? {
-            type: action.payload.media.type,
-            url: action.payload.media.url,
-            filename: action.payload.media.url.split('/').pop() ?? 'file',
-            sizeBytes: 0,
-          }
-        : null,
+      media: toMediaNode(action.payload?.media),
       conditionField: 'COMMENT_TEXT',
       conditionMatchType: 'CONTAINS',
       conditionKeywords: '',
@@ -340,11 +415,21 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
           return `"${button.title}" needs a link.`;
         }
         if (button.type === 'POSTBACK') {
-          if (!button.unlockedText.trim()) {
-            return `"${button.title}" needs a message to send when tapped.`;
+          const hasUnlocked = button.unlockedText.trim() || button.unlockedMedia;
+          if (button.unlockedText.trim() && button.unlockedMedia) {
+            return `"${button.title}"'s reply can be text or a media attachment, not both.`;
           }
-          if (button.requireFollow && !button.lockedText.trim()) {
-            return `"${button.title}" requires a follow, so it also needs a message for people who aren't following yet.`;
+          if (!hasUnlocked) {
+            return `"${button.title}" needs a reply (text or media) to send when tapped.`;
+          }
+          if (button.requireFollow) {
+            const hasLocked = button.lockedText.trim() || button.lockedMedia;
+            if (button.lockedText.trim() && button.lockedMedia) {
+              return `"${button.title}"'s locked reply can be text or a media attachment, not both.`;
+            }
+            if (!hasLocked) {
+              return `"${button.title}" requires a follow, so it also needs a reply for people who aren't following yet.`;
+            }
           }
         }
       }
@@ -360,6 +445,11 @@ interface ActionStepEditorProps {
   parentId: string | null;
   branch: 'then' | 'else' | null;
   storyReplyWarning: boolean;
+  // Workspace custom fields (contacts module), offered as {{field.<key>}}
+  // merge tags alongside the built-in {{username}}/{{full_name}} — fetched
+  // once by the page that mounts this editor, not by this component, so
+  // it's not re-fetched on every recursion into a CONDITION's branches.
+  customFields: CustomField[];
   onUpdate: (id: string, patch: Partial<ActionStepNode>) => void;
   onRemove: (id: string) => void;
   onAdd: (parentId: string | null, branch: 'then' | 'else' | null, type: ActionType) => void;
@@ -380,11 +470,13 @@ export function ActionStepEditor({
   parentId,
   branch,
   storyReplyWarning,
+  customFields,
   onUpdate,
   onRemove,
   onAdd,
 }: ActionStepEditorProps) {
   const canAddCondition = depth < MAX_ACTION_TREE_DEPTH;
+  const mergeFieldOptions = buildMergeFieldOptions(customFields);
 
   return (
     <div className="flex flex-col gap-3">
@@ -501,6 +593,7 @@ export function ActionStepEditor({
                     parentId={node.id}
                     branch="then"
                     storyReplyWarning={storyReplyWarning}
+                    customFields={customFields}
                     onUpdate={onUpdate}
                     onRemove={onRemove}
                     onAdd={onAdd}
@@ -535,6 +628,7 @@ export function ActionStepEditor({
                     parentId={node.id}
                     branch="else"
                     storyReplyWarning={storyReplyWarning}
+                    customFields={customFields}
                     onUpdate={onUpdate}
                     onRemove={onRemove}
                     onAdd={onAdd}
@@ -572,6 +666,10 @@ export function ActionStepEditor({
                   <Label htmlFor={`step-text-${node.id}`} className="text-xs text-muted-foreground">
                     Message
                   </Label>
+                  <MergeTagBar
+                    options={mergeFieldOptions}
+                    onInsert={(tag) => insertMergeTag(`step-text-${node.id}`, node.text, (v) => onUpdate(node.id, { text: v }), tag)}
+                  />
                   <textarea
                     id={`step-text-${node.id}`}
                     value={node.text}
@@ -581,18 +679,24 @@ export function ActionStepEditor({
                     className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Use {'{{username}}'} to insert the sender&apos;s name.
+                    Tap a tag above to insert it, or type it directly.
                     {storyReplyWarning &&
-                      ' For story replies this will show a numeric ID, not a handle — Instagram’s webhook doesn’t include a username for those.'}
+                      ' For story replies {{username}} will show a numeric ID, not a handle — Instagram’s webhook doesn’t include one for those.'}
                   </p>
                 </div>
               )}
 
               {node.type === 'SEND_DM' && (
                 <>
-                  {!node.media && <ButtonListEditor node={node} onUpdate={(patch) => onUpdate(node.id, patch)} />}
+                  {!node.media && (
+                    <ButtonListEditor node={node} mergeFieldOptions={mergeFieldOptions} onUpdate={(patch) => onUpdate(node.id, patch)} />
+                  )}
                   {node.buttons.length === 0 && (
-                    <MediaAttachmentEditor node={node} onUpdate={(patch) => onUpdate(node.id, patch)} />
+                    <MediaAttachmentEditor
+                      media={node.media}
+                      onAttach={(media) => onUpdate(node.id, { media, text: '' })}
+                      onRemove={() => onUpdate(node.id, { media: null })}
+                    />
                   )}
                 </>
               )}
@@ -604,7 +708,15 @@ export function ActionStepEditor({
   );
 }
 
-function ButtonListEditor({ node, onUpdate }: { node: ActionStepNode; onUpdate: (patch: Partial<ActionStepNode>) => void }) {
+function ButtonListEditor({
+  node,
+  mergeFieldOptions,
+  onUpdate,
+}: {
+  node: ActionStepNode;
+  mergeFieldOptions: MergeFieldOption[];
+  onUpdate: (patch: Partial<ActionStepNode>) => void;
+}) {
   function updateButton(buttonId: string, patch: Partial<ButtonNode>) {
     onUpdate({ buttons: node.buttons.map((b) => (b.id === buttonId ? { ...b, ...patch } : b)) });
   }
@@ -694,31 +806,59 @@ function ButtonListEditor({ node, onUpdate }: { node: ActionStepNode; onUpdate: 
               </label>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor={`btn-unlocked-${button.id}`} className="text-xs text-muted-foreground">
-                  {button.requireFollow ? 'Message when they already follow' : 'Message sent when tapped'}
+                <Label className="text-xs text-muted-foreground">
+                  {button.requireFollow ? 'Reply when they already follow' : 'Reply sent when tapped'}
                 </Label>
-                <textarea
-                  id={`btn-unlocked-${button.id}`}
-                  value={button.unlockedText}
-                  onChange={(e) => updateButton(button.id, { unlockedText: e.target.value })}
-                  rows={2}
-                  placeholder="Here's your link: ..."
-                  className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                {!button.unlockedMedia && (
+                  <>
+                    <MergeTagBar
+                      options={mergeFieldOptions}
+                      onInsert={(tag) =>
+                        insertMergeTag(`btn-unlocked-${button.id}`, button.unlockedText, (v) => updateButton(button.id, { unlockedText: v }), tag)
+                      }
+                    />
+                    <textarea
+                      id={`btn-unlocked-${button.id}`}
+                      value={button.unlockedText}
+                      onChange={(e) => updateButton(button.id, { unlockedText: e.target.value })}
+                      rows={2}
+                      placeholder="Here's your link: ..."
+                      className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                    />
+                  </>
+                )}
+                <MediaAttachmentEditor
+                  media={button.unlockedMedia}
+                  onAttach={(media) => updateButton(button.id, { unlockedMedia: media, unlockedText: '' })}
+                  onRemove={() => updateButton(button.id, { unlockedMedia: null })}
                 />
               </div>
 
               {button.requireFollow && (
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor={`btn-locked-${button.id}`} className="text-xs text-muted-foreground">
-                    Message when they don&apos;t follow yet
-                  </Label>
-                  <textarea
-                    id={`btn-locked-${button.id}`}
-                    value={button.lockedText}
-                    onChange={(e) => updateButton(button.id, { lockedText: e.target.value })}
-                    rows={2}
-                    placeholder="Follow me first, then tap the button again!"
-                    className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                  <Label className="text-xs text-muted-foreground">Reply when they don&apos;t follow yet</Label>
+                  {!button.lockedMedia && (
+                    <>
+                      <MergeTagBar
+                        options={mergeFieldOptions}
+                        onInsert={(tag) =>
+                          insertMergeTag(`btn-locked-${button.id}`, button.lockedText, (v) => updateButton(button.id, { lockedText: v }), tag)
+                        }
+                      />
+                      <textarea
+                        id={`btn-locked-${button.id}`}
+                        value={button.lockedText}
+                        onChange={(e) => updateButton(button.id, { lockedText: e.target.value })}
+                        rows={2}
+                        placeholder="Follow me first, then tap the button again!"
+                        className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                      />
+                    </>
+                  )}
+                  <MediaAttachmentEditor
+                    media={button.lockedMedia}
+                    onAttach={(media) => updateButton(button.id, { lockedMedia: media, lockedText: '' })}
+                    onRemove={() => updateButton(button.id, { lockedMedia: null })}
                   />
                 </div>
               )}
@@ -744,11 +884,13 @@ function formatBytes(bytes: number): string {
  * different message shapes, never combined.
  */
 function MediaAttachmentEditor({
-  node,
-  onUpdate,
+  media,
+  onAttach,
+  onRemove,
 }: {
-  node: ActionStepNode;
-  onUpdate: (patch: Partial<ActionStepNode>) => void;
+  media: MediaNode | null;
+  onAttach: (media: MediaNode) => void;
+  onRemove: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -763,10 +905,7 @@ function MediaAttachmentEditor({
     setError(null);
     try {
       const uploaded = await mediaApi.upload(file);
-      onUpdate({
-        media: { type: uploaded.type, url: uploaded.url, filename: uploaded.filename, sizeBytes: uploaded.sizeBytes },
-        text: '',
-      });
+      onAttach({ type: uploaded.type, url: uploaded.url, filename: uploaded.filename, sizeBytes: uploaded.sizeBytes });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not upload this file.');
     } finally {
@@ -774,9 +913,9 @@ function MediaAttachmentEditor({
     }
   }
 
-  if (node.media) {
-    const Icon = MEDIA_ICON[node.media.type];
-    const sizeLabel = formatBytes(node.media.sizeBytes);
+  if (media) {
+    const Icon = MEDIA_ICON[media.type];
+    const sizeLabel = formatBytes(media.sizeBytes);
     return (
       <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-border bg-background p-3">
         <div className="flex min-w-0 items-center gap-2.5">
@@ -784,16 +923,16 @@ function MediaAttachmentEditor({
             <Icon size={15} />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm text-foreground">{node.media.filename}</p>
+            <p className="truncate text-sm text-foreground">{media.filename}</p>
             <p className="text-xs capitalize text-muted-foreground">
-              {node.media.type}
+              {media.type}
               {sizeLabel && ` · ${sizeLabel}`}
             </p>
           </div>
         </div>
         <button
           type="button"
-          onClick={() => onUpdate({ media: null })}
+          onClick={onRemove}
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
           aria-label="Remove attachment"
         >

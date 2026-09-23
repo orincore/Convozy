@@ -1,3 +1,8 @@
+// AutomationsService now pulls in ContactsService (merge tags) →
+// segment-rule.dto.ts's @Type() decorators, which need Reflect.getMetadata
+// at class-definition time — same fix as contacts.service.spec.ts.
+import 'reflect-metadata';
+
 // templates.service.ts imports AutomationsService (for reuse, per CLAUDE.md
 // §3 rule 1), which transitively imports @nestjs/bullmq — ESM-only in this
 // NestJS 12 line, which ts-jest's CommonJS transform can't load. Neither

@@ -1,3 +1,10 @@
+// Needed now that AutomationsService pulls in ContactsService (for
+// {{field.<key>}} merge tags) → segment-rule.dto.ts's @Type() decorators —
+// same fix already applied in contacts.service.spec.ts/
+// webhook-events.processor.spec.ts for the same reason (class-transformer's
+// @Type() calls Reflect.getMetadata at class-definition time).
+import 'reflect-metadata';
+
 // @nestjs/common, @nestjs/config and @nestjs/bullmq ship ESM-only in this
 // NestJS 12 line, which ts-jest's CommonJS transform can't load — see
 // jest.config.js history / TRACKER.md. These tests construct
@@ -180,6 +187,11 @@ function makeService(prismaOverrides: Record<string, any> = {}) {
 
   const instagramService = {
     accountBelongsToWorkspace: jest.fn().mockResolvedValue(true),
+    fetchSenderProfile: jest.fn().mockResolvedValue({ name: null, username: null }),
+  } as any;
+
+  const contactsService = {
+    findByIgScopedId: jest.fn().mockResolvedValue(null),
   } as any;
 
   const entitlementsService = {
@@ -192,11 +204,12 @@ function makeService(prismaOverrides: Record<string, any> = {}) {
   const service = new AutomationsService(
     prisma,
     instagramService,
+    contactsService,
     entitlementsService,
     messageSendQueue,
     aiProcessingQueue,
   );
-  return { service, prisma, instagramService, entitlementsService, messageSendQueue, aiProcessingQueue };
+  return { service, prisma, instagramService, contactsService, entitlementsService, messageSendQueue, aiProcessingQueue };
 }
 
 describe('AutomationsService.matchCommentEvent', () => {
@@ -588,6 +601,138 @@ describe('AutomationsService.matchCommentEvent', () => {
   });
 });
 
+describe('AutomationsService merge tags ({{username}}, {{full_name}}, {{field.<key>}})', () => {
+  it('renders {{full_name}} via a live profile fetch when the sender has an igScopedId', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ fromIgScopedId: 'igsid-1' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.SEND_DM,
+            order: 0,
+            delaySeconds: 0,
+            payload: { text: 'Hi {{full_name}}!' },
+          },
+        ],
+      }),
+    ]);
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: 'Peter Chang', username: 'peter_chang' });
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(instagramService.fetchSenderProfile).toHaveBeenCalledWith('ig-account-1', 'igsid-1');
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'Hi Peter Chang!' }) }),
+      expect.any(Object),
+    );
+  });
+
+  it('resolves {{username}} live (instead of a network fetch) for a conversation-sourced event, where fromUsername is actually an IGSID', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({ source: TriggerSource.STORY_REPLY, fromUsername: 'igsid-story-1', text: 'love it' }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.STORY_REPLY,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: ['love'],
+            caseSensitive: false,
+          },
+        ],
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.SEND_DM,
+            order: 0,
+            delaySeconds: 0,
+            payload: { text: 'Thanks {{username}}!' },
+          },
+        ],
+      }),
+    ]);
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: null, username: 'story_viewer' });
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(instagramService.fetchSenderProfile).toHaveBeenCalledWith('ig-account-1', 'igsid-story-1');
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'Thanks story_viewer!' }) }),
+      expect.any(Object),
+    );
+  });
+
+  it('renders {{field.<key>}} from the sender\'s Contact custom-field values', async () => {
+    const { service, prisma, contactsService, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ fromIgScopedId: 'igsid-1' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.SEND_DM,
+            order: 0,
+            delaySeconds: 0,
+            payload: { text: 'Your size: {{field.shirt_size}}' },
+          },
+        ],
+      }),
+    ]);
+    contactsService.findByIgScopedId.mockResolvedValue({
+      fieldValues: [{ customField: { key: 'shirt_size', label: 'Shirt size', type: 'TEXT' }, value: 'L' }],
+    });
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(contactsService.findByIgScopedId).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'igsid-1');
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'Your size: L' }) }),
+      expect.any(Object),
+    );
+  });
+
+  it('leaves an unrecognized {{tag}} untouched instead of silently dropping it', async () => {
+    const { service, prisma, instagramService, contactsService, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ fromIgScopedId: 'igsid-1' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.SEND_DM,
+            order: 0,
+            delaySeconds: 0,
+            payload: { text: 'Value: {{not_a_real_tag}}' },
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(instagramService.fetchSenderProfile).not.toHaveBeenCalled();
+    expect(contactsService.findByIgScopedId).not.toHaveBeenCalled();
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'Value: {{not_a_real_tag}}' }) }),
+      expect.any(Object),
+    );
+  });
+});
+
 describe('AutomationsService CRUD ownership', () => {
   it('create() rejects when the Instagram account is not in the caller workspace', async () => {
     const { service, instagramService } = makeService();
@@ -870,6 +1015,61 @@ describe('AutomationsService.resolvePostback', () => {
     });
 
     expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('sends a media reply (instead of text) when the unlocked reply is a media attachment', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the photo',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: false,
+              unlockedMedia: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' },
+            },
+          ],
+        },
+      }),
+    );
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: { text: undefined, media: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' } },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('renders merge tags in the reply text before sending', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(makeAction({ payload: { text: 'pick one', buttons: [{ title: 'Get it', type: 'POSTBACK', payload: 'action-1:0', requireFollow: false, unlockedText: 'Hi {{username}}!' }] } }));
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: null, username: 'tapper_handle' });
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-1',
+    });
+
+    expect(instagramService.fetchSenderProfile).toHaveBeenCalledWith('ig-account-1', 'ig-scoped-user-1');
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ text: 'Hi tapper_handle!' }) }),
+      expect.any(Object),
+    );
   });
 });
 
@@ -1284,5 +1484,79 @@ describe('AutomationsService condition/branching — write-time validation', () 
     const elseCall = calls.find((c: any) => c.branch === ActionBranch.ELSE);
     expect(thenCall.parentActionId).toBe(conditionActionId);
     expect(elseCall.parentActionId).toBe(conditionActionId);
+  });
+});
+
+describe('AutomationsService write-time validation — POSTBACK button replies', () => {
+  function baseCreateInput(actions: any[]) {
+    return {
+      name: 'x',
+      instagramAccountId: 'ig-account-1',
+      triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+      actions,
+    } as any;
+  }
+
+  function sendDmWithButton(button: Record<string, unknown>) {
+    return [{ type: ActionType.SEND_DM, payload: { text: 'pick one', buttons: [{ title: 'Get it', type: 'POSTBACK', ...button }] } }];
+  }
+
+  it('rejects a POSTBACK button with neither unlockedText nor unlockedMedia', async () => {
+    const { service } = makeService();
+
+    await expect(service.create('workspace-1', baseCreateInput(sendDmWithButton({})))).rejects.toThrow(AppException);
+  });
+
+  it('rejects a POSTBACK button with both unlockedText and unlockedMedia', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput(
+          sendDmWithButton({ unlockedText: 'hi', unlockedMedia: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' } }),
+        ),
+      ),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('rejects a requireFollow button with no locked reply', async () => {
+    const { service } = makeService();
+
+    await expect(
+      service.create('workspace-1', baseCreateInput(sendDmWithButton({ requireFollow: true, unlockedText: 'hi' }))),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('accepts a POSTBACK button whose unlocked reply is media-only', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue(makeAutomation());
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput(sendDmWithButton({ unlockedMedia: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' } })),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('accepts a requireFollow button whose locked reply is media-only', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue(makeAutomation());
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput(
+          sendDmWithButton({
+            requireFollow: true,
+            unlockedText: 'hi',
+            lockedMedia: { type: 'image', url: 'https://convozy.media.orincore.com/x.png' },
+          }),
+        ),
+      ),
+    ).resolves.toBeDefined();
   });
 });

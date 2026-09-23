@@ -1,3 +1,8 @@
+// AutomationsService now pulls in ContactsService (merge tags) →
+// segment-rule.dto.ts's @Type() decorators, which need Reflect.getMetadata
+// at class-definition time — same fix as contacts.service.spec.ts.
+import 'reflect-metadata';
+
 // This processor statically imports AutomationsService, so its whole
 // transitive import graph (PrismaService, ConfigService, etc.) must load
 // without error even though the test constructs AutomationMatchProcessor

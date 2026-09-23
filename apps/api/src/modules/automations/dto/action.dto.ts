@@ -16,15 +16,34 @@ import {
 import { ActionType } from '@prisma/client';
 import { ConditionDto } from './condition.dto';
 
+// A single media attachment on a message (image/GIF, video, audio, or a PDF
+// file) — Meta's Send API sends this as its own message, separate from a
+// text message or a Button Template (message.attachment.type set to this
+// same string). `url` is always Convozy's own R2-hosted URL (see the media
+// module's upload endpoint), never an arbitrary client-supplied URL — DTO-
+// level validation only checks it's a well-formed URL string; the real
+// trust boundary is that the dashboard only ever offers URLs it just
+// uploaded itself. Reused both for a SEND_DM action's own payload.media and
+// for a POSTBACK button's unlockedMedia/lockedMedia below.
+export class ActionMediaDto {
+  @IsIn(['image', 'video', 'audio', 'file'])
+  type!: 'image' | 'video' | 'audio' | 'file';
+
+  @IsString()
+  @MinLength(1)
+  url!: string;
+}
+
 // A button on a DM (Meta's Button Template — messaging-api/button-template).
 // WEB_URL opens a link, unchanged from before. POSTBACK is new: tapping it
 // fires a messaging_postbacks webhook Convozy resolves back to this exact
 // button (see AutomationsService.createActionTree/resolvePostback) and
-// replies with `unlockedText`, or `lockedText` if `requireFollow` is set and
-// the tapper isn't following (InstagramService.checkIsFollowing). `payload`
-// is never trusted from the client — the server always assigns it as
-// `${actionId}:${buttonIndex}` once the action row exists, so a postback can
-// never be forged to resolve to another workspace's action.
+// replies with `unlockedText`/`unlockedMedia`, or the locked pair if
+// `requireFollow` is set and the tapper isn't following
+// (InstagramService.checkIsFollowing). `payload` is never trusted from the
+// client — the server always assigns it as `${actionId}:${buttonIndex}` once
+// the action row exists, so a postback can never be forged to resolve to
+// another workspace's action.
 export class ActionButtonDto {
   @IsString()
   @MinLength(1)
@@ -42,37 +61,35 @@ export class ActionButtonDto {
   @IsBoolean()
   requireFollow?: boolean;
 
-  // The message sent back when tapped and either not gated, or gated and
-  // the tapper is following.
-  @ValidateIf((o: ActionButtonDto) => o.type === 'POSTBACK')
+  // The reply sent back when tapped and either not gated, or gated and the
+  // tapper is following. Text and media are mutually exclusive (checked in
+  // AutomationsService, same as ActionPayloadDto.text/media below) — Meta
+  // sends these as different message types, and exactly one of the two is
+  // required for a POSTBACK button (also checked in AutomationsService, since
+  // "at least one of two optional sibling fields" isn't a single-decorator
+  // class-validator check).
+  @ValidateIf((o: ActionButtonDto) => o.type === 'POSTBACK' && !o.unlockedMedia)
   @IsString()
   @MinLength(1)
   unlockedText?: string;
 
-  // The message sent back when tapped, gated (requireFollow), and the
-  // tapper is not (or not verifiably) following — fails closed, see
-  // InstagramService.checkIsFollowing.
-  @ValidateIf((o: ActionButtonDto) => o.type === 'POSTBACK' && o.requireFollow === true)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ActionMediaDto)
+  unlockedMedia?: ActionMediaDto;
+
+  // The reply sent back when tapped, gated (requireFollow), and the tapper
+  // is not (or not verifiably) following — fails closed, see
+  // InstagramService.checkIsFollowing. Same text/media exclusivity as above.
+  @ValidateIf((o: ActionButtonDto) => o.type === 'POSTBACK' && o.requireFollow === true && !o.lockedMedia)
   @IsString()
   @MinLength(1)
   lockedText?: string;
-}
 
-// A single media attachment on a SEND_DM message (image/GIF, video, audio,
-// or a PDF file) — Meta's Send API sends this as its own message, separate
-// from a text message or a Button Template (message.attachment.type set to
-// this same string). `url` is always Convozy's own R2-hosted URL (see the
-// media module's upload endpoint), never an arbitrary client-supplied URL —
-// DTO-level validation only checks it's a well-formed URL string; the real
-// trust boundary is that the dashboard only ever offers URLs it just
-// uploaded itself.
-export class ActionMediaDto {
-  @IsIn(['image', 'video', 'audio', 'file'])
-  type!: 'image' | 'video' | 'audio' | 'file';
-
-  @IsString()
-  @MinLength(1)
-  url!: string;
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ActionMediaDto)
+  lockedMedia?: ActionMediaDto;
 }
 
 export class ActionPayloadDto {

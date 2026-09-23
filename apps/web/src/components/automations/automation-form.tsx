@@ -26,9 +26,11 @@ import {
   AutomationTemplate,
   ConnectedAccount,
   CreateAutomationInput,
+  CustomField,
   RecentMediaItem,
   instagramApi,
   automationsApi,
+  customFieldsApi,
   templatesApi,
   TriggerSource,
   TriggerMatchType,
@@ -320,6 +322,12 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   const [templates, setTemplates] = useState<AutomationTemplate[] | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(null);
+  // Offered as {{field.<key>}} merge tags in every message/reply field
+  // (ActionStepEditor) — fetched once here rather than per-field so tapping
+  // a tag chip doesn't wait on a network round trip. A fetch failure just
+  // means no custom-field tags are offered (username/full_name still are);
+  // it's not worth blocking or erroring the whole form over.
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
 
   useEffect(() => {
     // Templates are a "start fresh" concept — irrelevant once editing an
@@ -327,6 +335,10 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (isEdit) return;
     templatesApi.list().then(setTemplates).catch((err: ApiError) => setTemplatesError(err.message));
   }, [isEdit]);
+
+  useEffect(() => {
+    customFieldsApi.list().then(setCustomFields).catch(() => setCustomFields([]));
+  }, []);
 
   function applyTemplate(template: AutomationTemplate) {
     setName(template.name);
@@ -644,6 +656,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
               parentId={null}
               branch={null}
               storyReplyWarning={includesStoryReply}
+              customFields={customFields}
               onUpdate={(id, patch) => setActionSteps((current) => updateActionStep(current, id, patch))}
               onRemove={(id) => setActionSteps((current) => removeActionStep(current, id))}
               onAdd={(parentId, branch, type) =>

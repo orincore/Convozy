@@ -21,6 +21,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException, ForbiddenAppException, NotFoundAppException } from '../../common/utils/app-exception';
 import { InstagramService } from '../instagram/instagram.service';
+import { ContactsService } from '../contacts/contacts.service';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { FEATURE_KEYS } from '../billing/entitlements.constants';
 import { QueueName } from '../../queues/constants';
@@ -86,6 +87,7 @@ export class AutomationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly instagramService: InstagramService,
+    private readonly contactsService: ContactsService,
     private readonly entitlementsService: EntitlementsService,
     @InjectQueue(QueueName.MESSAGE_SEND) private readonly messageSendQueue: Queue<MessageSendJobData>,
     @InjectQueue(QueueName.AI_PROCESSING) private readonly aiProcessingQueue: Queue<AiProcessingJobData>,
@@ -341,6 +343,34 @@ export class AutomationsService {
             );
           }
         }
+        for (const button of action.payload?.buttons ?? []) {
+          if (button.type !== 'POSTBACK') {
+            continue;
+          }
+          if (button.unlockedText && button.unlockedMedia) {
+            throw new AppException(
+              'INVALID_ACTION',
+              `Button "${button.title}"'s reply can be text or a media attachment, not both.`,
+            );
+          }
+          if (!button.unlockedText && !button.unlockedMedia) {
+            throw new AppException('INVALID_ACTION', `Button "${button.title}" needs a reply (text or media) for when it's tapped.`);
+          }
+          if (button.requireFollow) {
+            if (button.lockedText && button.lockedMedia) {
+              throw new AppException(
+                'INVALID_ACTION',
+                `Button "${button.title}"'s locked reply can be text or a media attachment, not both.`,
+              );
+            }
+            if (!button.lockedText && !button.lockedMedia) {
+              throw new AppException(
+                'INVALID_ACTION',
+                `Button "${button.title}" requires following, so it needs a locked reply (text or media) too.`,
+              );
+            }
+          }
+        }
         continue;
       }
       if (!action.condition || !action.children) {
@@ -571,6 +601,29 @@ export class AutomationsService {
       return;
     }
 
+    let content: MessageSendJobData['content'] = {};
+    if (action.type !== ActionType.HIDE_COMMENT) {
+      const payload = action.payload as unknown as ActionPayloadDto;
+      // See the recipientId comment below: for conversation-sourced events
+      // fromUsername actually holds the sender's IG-scoped ID, not a real
+      // username, so the merge-tag {{username}} fallback needs a live
+      // profile fetch there instead (renderMergeTags handles this).
+      const igScopedId = isConversationSourced ? commentEvent.fromUsername : commentEvent.fromIgScopedId;
+      const username = isConversationSourced ? undefined : commentEvent.fromUsername;
+      content = {
+        text: payload.text
+          ? await this.renderMergeTags(payload.text, {
+              workspaceId: commentEvent.workspaceId,
+              instagramAccountId: commentEvent.instagramAccountId,
+              igScopedId,
+              username,
+            })
+          : undefined,
+        buttons: payload.buttons,
+        media: payload.media,
+      };
+    }
+
     const jobData: MessageSendJobData =
       action.type === ActionType.HIDE_COMMENT
         ? {
@@ -596,31 +649,72 @@ export class AutomationsService {
             recipientId: isConversationSourced ? commentEvent.fromUsername : commentEvent.externalEventId,
             recipientType: isConversationSourced ? 'user' : 'comment',
             actionType: action.type,
-            content: (() => {
-              const payload = action.payload as unknown as ActionPayloadDto;
-              return {
-                text: payload.text ? this.renderText(payload.text, commentEvent) : undefined,
-                buttons: payload.buttons,
-                media: payload.media,
-              };
-            })(),
+            content,
             commentEventId: commentEvent.id,
           };
     await this.messageSendQueue.add('send', jobData, { delay, jobId });
   }
 
-  private renderText(template: string, commentEvent: CommentEvent): string {
-    return template.replace(/\{\{\s*username\s*\}\}/g, commentEvent.fromUsername);
+  // Recognized merge tags: {{username}}, {{full_name}}, and
+  // {{field.<custom field key>}} for every workspace-defined CustomField
+  // (contacts module — Milestone 2). Live Graph API lookups (username
+  // fallback, full_name) only fire when the template actually references
+  // them, and only when an igScopedId is available at all — a stub tag
+  // left in a template that can't be resolved renders as an empty string
+  // rather than blocking the send, matching checkIsFollowing/
+  // fetchSenderProfile's fail-closed contract. An unrecognized {{tag}} is
+  // left in the output untouched, so a typo is visible instead of silently
+  // vanishing.
+  private static readonly MERGE_TAG_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+
+  private async renderMergeTags(
+    template: string,
+    ctx: { workspaceId: string; instagramAccountId: string; igScopedId?: string | null; username?: string | null },
+  ): Promise<string> {
+    const tags = new Set<string>();
+    for (const match of template.matchAll(AutomationsService.MERGE_TAG_PATTERN)) {
+      tags.add(match[1]);
+    }
+    if (tags.size === 0) {
+      return template;
+    }
+
+    let username = ctx.username ?? undefined;
+    let fullName: string | undefined;
+    if (ctx.igScopedId && (tags.has('full_name') || (tags.has('username') && !username))) {
+      const profile = await this.instagramService.fetchSenderProfile(ctx.instagramAccountId, ctx.igScopedId);
+      fullName = profile.name ?? undefined;
+      username = username ?? profile.username ?? undefined;
+    }
+
+    let fieldValues: Record<string, string> | undefined;
+    if (ctx.igScopedId && [...tags].some((tag) => tag.startsWith('field.'))) {
+      const contact = await this.contactsService.findByIgScopedId(ctx.workspaceId, ctx.instagramAccountId, ctx.igScopedId);
+      fieldValues = {};
+      for (const fv of contact?.fieldValues ?? []) {
+        fieldValues[fv.customField.key] = fv.value;
+      }
+    }
+
+    return template.replace(AutomationsService.MERGE_TAG_PATTERN, (full, tag: string) => {
+      if (tag === 'username') return username ?? '';
+      if (tag === 'full_name') return fullName ?? '';
+      if (tag.startsWith('field.')) return fieldValues?.[tag.slice('field.'.length)] ?? '';
+      return full;
+    });
   }
 
   /**
    * Resolves a tapped postback button (messaging_postbacks webhook) back to
    * the SEND_DM action that sent it, decides which of its two customizable
-   * messages applies (checking follow status first if the button requires
-   * it), and enqueues the reply. `payload` is always `${actionId}:${buttonIndex}`
-   * — server-generated at write time (see createActionTree), never trusted
-   * as arbitrary client input, so the instagramAccountId cross-check below
-   * is defense in depth rather than the primary safeguard.
+   * replies applies (checking follow status first if the button requires
+   * it), and enqueues it — text or media, mirroring the same mutual
+   * exclusivity as a regular SEND_DM's payload.text/payload.media
+   * (validateActionTree enforces exactly one of each pair at write time).
+   * `payload` is always `${actionId}:${buttonIndex}` — server-generated at
+   * write time (see createActionTree), never trusted as arbitrary client
+   * input, so the instagramAccountId cross-check below is defense in depth
+   * rather than the primary safeguard.
    */
   async resolvePostback(data: PostbackEventJobData): Promise<void> {
     const separatorIndex = data.payload.lastIndexOf(':');
@@ -647,14 +741,24 @@ export class AutomationsService {
       return;
     }
 
-    let text = button.unlockedText ?? '';
+    let rawText = button.unlockedText;
+    let media = button.unlockedMedia;
     if (button.requireFollow) {
       const isFollowing = await this.instagramService.checkIsFollowing(data.instagramAccountId, data.senderId);
-      text = isFollowing ? button.unlockedText ?? '' : button.lockedText ?? '';
+      rawText = isFollowing ? button.unlockedText : button.lockedText;
+      media = isFollowing ? button.unlockedMedia : button.lockedMedia;
     }
-    if (!text) {
+    if (!rawText && !media) {
       return;
     }
+
+    const text = rawText
+      ? await this.renderMergeTags(rawText, {
+          workspaceId: action.automation.workspaceId,
+          instagramAccountId: data.instagramAccountId,
+          igScopedId: data.senderId,
+        })
+      : undefined;
 
     const jobData: MessageSendJobData = {
       workspaceId: action.automation.workspaceId,
@@ -662,7 +766,7 @@ export class AutomationsService {
       recipientId: data.senderId,
       recipientType: 'user',
       actionType: ActionType.SEND_DM,
-      content: { text },
+      content: { text, media },
     };
     // Stable jobId keyed off the postback's own message id — a safe no-op
     // in BullMQ if Meta redelivers the same postback (the webhook-controller

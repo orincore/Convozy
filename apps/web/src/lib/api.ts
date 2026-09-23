@@ -180,10 +180,11 @@ export type ActionButtonKind = 'WEB_URL' | 'POSTBACK';
 
 // A button on a SEND_DM message (Meta's Button Template — up to 3 per
 // message). WEB_URL opens a link. POSTBACK fires a tap-to-unlock response:
-// `unlockedText` is sent back immediately, unless `requireFollow` is set, in
-// which case Convozy checks live whether the tapper follows the account and
-// sends `lockedText` instead if they don't. `payload` is server-generated
-// (see the backend's ActionButtonDto) — never set it from the client.
+// `unlockedText`/`unlockedMedia` (exactly one of the two) is sent back
+// immediately, unless `requireFollow` is set, in which case Convozy checks
+// live whether the tapper follows the account and sends the locked pair
+// instead if they don't. `payload` is server-generated (see the backend's
+// ActionButtonDto) — never set it from the client.
 export interface ActionButtonInput {
   title: string;
   type: ActionButtonKind;
@@ -191,7 +192,9 @@ export interface ActionButtonInput {
   payload?: string;
   requireFollow?: boolean;
   unlockedText?: string;
+  unlockedMedia?: ActionMediaInput;
   lockedText?: string;
+  lockedMedia?: ActionMediaInput;
 }
 
 // Mirrors TriggerInput's matchType options (including the AI_INTENT stub) —

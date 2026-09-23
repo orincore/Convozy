@@ -732,4 +732,66 @@ describe('InstagramService', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
   });
+
+  describe('fetchSenderProfile', () => {
+    it('returns name + username on success', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ name: 'Peter Chang', username: 'peter_chang' }) }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+      const result = await service.fetchSenderProfile('acc-1', 'igsid-1');
+
+      expect(result).toEqual({ name: 'Peter Chang', username: 'peter_chang' });
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('https://graph.instagram.com/v21.0/igsid-1?fields=name%2Cusername'));
+    });
+
+    it('fails closed to nulls on a Graph API error response (e.g. consent required)', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'User consent is required' }) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.fetchSenderProfile('acc-1', 'igsid-1')).toEqual({ name: null, username: null });
+    });
+
+    it('fails closed to nulls on a network-level failure instead of throwing', async () => {
+      const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
+      const prisma = {
+        instagramAccount: {
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
+        },
+      } as any;
+      global.fetch = jest.fn().mockRejectedValue(new Error('fetch failed')) as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      await expect(service.fetchSenderProfile('acc-1', 'igsid-1')).resolves.toEqual({ name: null, username: null });
+    });
+
+    it('fails closed to nulls when the account has no usable credentials', async () => {
+      const prisma = { instagramAccount: { findUnique: jest.fn().mockResolvedValue(null) } } as any;
+      global.fetch = jest.fn() as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      expect(await service.fetchSenderProfile('missing-acc', 'igsid-1')).toEqual({ name: null, username: null });
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
 });
