@@ -347,6 +347,61 @@ export class InstagramService {
     }
   }
 
+  /**
+   * The full DM thread with one person, oldest first, read live from Instagram
+   * (GET /<ig-user-id>/conversations?user_id=..., then the conversation's messages;
+   * both verified against graph.instagram.com 2026-09-29). Includes messages sent by
+   * automations and typed in the Instagram app, not just ones sent from Convozy.
+   * Returns null when Instagram can't be reached or the account is unavailable.
+   */
+  async fetchDmHistory(
+    instagramAccountId: string,
+    igScopedId: string,
+    limit = 100,
+  ): Promise<{ id: string; text: string; fromCustomer: boolean; createdAt: string; hasAttachment: boolean }[] | null> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return null;
+    }
+    const meta = this.configService.get('meta', { infer: true });
+    const base = `https://graph.instagram.com/${meta.graphApiVersion}`;
+    try {
+      const found = await fetch(
+        `${base}/${credentials.igBusinessId}/conversations?${new URLSearchParams({ platform: 'instagram', user_id: igScopedId, fields: 'id', access_token: credentials.accessToken }).toString()}`,
+      );
+      if (!found.ok) {
+        this.logger.warn(`DM history lookup failed for account ${instagramAccountId}: ${found.status}`);
+        return null;
+      }
+      const conversationId = ((await found.json()) as { data?: { id: string }[] }).data?.[0]?.id;
+      if (!conversationId) {
+        return [];
+      }
+      const res = await fetch(
+        `${base}/${conversationId}?${new URLSearchParams({ fields: `messages.limit(${limit}){id,message,from,created_time,attachments}`, access_token: credentials.accessToken }).toString()}`,
+      );
+      if (!res.ok) {
+        this.logger.warn(`DM history fetch failed for account ${instagramAccountId}: ${res.status}`);
+        return null;
+      }
+      const json = (await res.json()) as {
+        messages?: { data: { id: string; message?: string; from?: { id?: string }; created_time: string; attachments?: unknown }[] };
+      };
+      return (json.messages?.data ?? [])
+        .map((m) => ({
+          id: m.id,
+          text: m.message ?? '',
+          fromCustomer: m.from?.id === igScopedId,
+          createdAt: m.created_time,
+          hasAttachment: Boolean(m.attachments),
+        }))
+        .reverse(); // Instagram returns newest first
+    } catch (err) {
+      this.logger.warn(`DM history fetch threw for account ${instagramAccountId}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
   /** IDs of every ACTIVE connected account, for periodic per-account syncs. */
   async listActiveAccountIds(): Promise<string[]> {
     const accounts = await this.prisma.instagramAccount.findMany({

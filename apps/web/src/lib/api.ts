@@ -18,7 +18,7 @@ export class ApiError extends Error {
 // during a refresh awaits this one shared promise instead.
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
@@ -523,7 +523,8 @@ export interface TicketCounts {
 
 export interface TicketReplyOptions {
   canPublicReply: boolean;
-  dmMode: 'DM' | 'PRIVATE_REPLY' | null;
+  // HUMAN_AGENT = a person replying up to 7 days after their last message (Instagram's Human Agent tag).
+  dmMode: 'DM' | 'HUMAN_AGENT' | 'PRIVATE_REPLY' | null;
   dmUnavailableReason: string | null;
 }
 
@@ -577,6 +578,20 @@ export interface TicketDetail {
   events: TicketEvent[];
 }
 
+/** One message of the person's Instagram DM thread, read live from Instagram. */
+export interface TicketHistoryMessage {
+  id: string;
+  text: string;
+  fromCustomer: boolean;
+  createdAt: string;
+  hasAttachment: boolean;
+}
+
+export interface TicketHistory {
+  available: boolean;
+  messages: TicketHistoryMessage[];
+}
+
 export interface TicketSettings {
   enabled: boolean;
   keywords: string[];
@@ -614,6 +629,8 @@ export const ticketsApi = {
     authFetch<TicketMessage>(`/tickets/${id}/replies`, { method: 'POST', body: JSON.stringify(input) }),
   addNote: (id: string, text: string) =>
     authFetch<TicketMessage>(`/tickets/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) }),
+  history: (id: string, participantId: string) =>
+    authFetch<TicketHistory>(`/tickets/${id}/participants/${participantId}/history`),
   getSettings: () => authFetch<TicketSettings>('/tickets/settings'),
   // Only the editable fields are sent: the API rejects unknown properties, and
   // the record it returns also carries id, workspaceId, instagramAccountId and updatedAt.

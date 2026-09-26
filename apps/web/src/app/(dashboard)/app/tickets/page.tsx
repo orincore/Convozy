@@ -1,5 +1,6 @@
 'use client';
 
+import { useTicketStream } from '@/lib/ticket-stream';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -119,11 +120,12 @@ export default function TicketsPage() {
     return () => clearTimeout(t);
   }, [load, search]);
 
-  // Keep the list fresh while the tab is open; new complaints arrive by webhook.
+  // Live updates arrive over the stream; the slow poll only covers a dropped connection.
+  useTicketStream(() => load());
   useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') load();
-    }, 20_000);
+    }, 60_000);
     return () => clearInterval(id);
   }, [load]);
 

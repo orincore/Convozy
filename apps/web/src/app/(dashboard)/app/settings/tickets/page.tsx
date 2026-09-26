@@ -15,7 +15,7 @@ const TOGGLES: { key: keyof Omit<TicketSettings, 'keywords' | 'enabled'>; title:
   {
     key: 'createFromMentions',
     title: 'Comments that @mention your account',
-    hint: 'A comment on your post that tags your handle opens a ticket. Several people on the same post share one ticket.',
+    hint: 'A comment on your post that tags your handle opens a ticket. Several people on the same post share one ticket. Once that ticket is resolved, later complaints on the post are ignored.',
   },
   {
     key: 'createFromStoryMentions',

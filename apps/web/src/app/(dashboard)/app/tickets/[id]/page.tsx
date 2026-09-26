@@ -32,6 +32,9 @@ import {
   teamApi,
   ticketsApi,
 } from '@/lib/api';
+import { TicketComposer } from '@/components/tickets/composer';
+import { ThreadView, buildThread } from '@/components/tickets/thread';
+import { useTicketStream } from '@/lib/ticket-stream';
 import { getCurrentUser } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import {
@@ -44,16 +47,6 @@ import {
   initials,
   timeAgo,
 } from '@/components/tickets/ticket-meta';
-
-type Mode = 'DM' | 'PUBLIC_REPLY' | 'NOTE';
-
-const CHANNEL_LABEL: Record<TicketMessage['channel'], string> = {
-  COMMENT: 'Comment',
-  DM: 'Direct message',
-  PUBLIC_REPLY: 'Public reply',
-  NOTE: 'Internal note',
-  TAGGED_POST: 'Tagged post',
-};
 
 function fullDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Not yet';
@@ -98,10 +91,7 @@ export default function TicketDetailPage() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [chosenMode, setMode] = useState<Mode>('DM');
   const [participantId, setParticipantId] = useState('');
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
   const threadEnd = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
 
@@ -119,12 +109,15 @@ export default function TicketDetailPage() {
   useEffect(() => {
     teamApi.members().then(setMembers).catch(() => undefined);
   }, []);
+  const live = useTicketStream((e) => {
+    if (e.ticketId === id) load();
+  });
   useEffect(() => {
     const t = setInterval(() => {
-      if (document.visibilityState === 'visible' && !sending) load();
-    }, 10_000);
+      if (document.visibilityState === 'visible') load();
+    }, 60_000);
     return () => clearInterval(t);
-  }, [load, sending]);
+  }, [load]);
 
   // Follow the conversation only when something new arrived, not on every poll.
   useEffect(() => {
@@ -136,23 +129,7 @@ export default function TicketDetailPage() {
   }, [ticket?.messages.length]);
 
   const people = useMemo(() => new Map(members.map((m) => [m.id, m.name || m.email])), [members]);
-  const participantById = useMemo(() => new Map((ticket?.participants ?? []).map((p) => [p.id, p])), [ticket]);
-
-  // Default to the most recently active person.
-  const activeParticipant: TicketParticipant | undefined =
-    participantById.get(participantId) ?? ticket?.participants[ticket.participants.length - 1];
-  const options = activeParticipant?.replyOptions;
-
-  const modeAvailable = (m: Mode): boolean => {
-    if (m === 'NOTE') return true;
-    if (!options) return false;
-    return m === 'DM' ? options.dmMode !== null : options.canPublicReply;
-  };
-
-  // If the chosen mode isn't possible for this person, fall back to one that is.
-  const mode: Mode = modeAvailable(chosenMode)
-    ? chosenMode
-    : (['DM', 'PUBLIC_REPLY', 'NOTE'] as Mode[]).find(modeAvailable) ?? 'NOTE';
+  const thread = useMemo(() => buildThread(ticket?.messages ?? [], [], null), [ticket?.messages]);
 
   async function patch(input: Parameters<typeof ticketsApi.update>[1]) {
     setActionError(null);
@@ -160,26 +137,6 @@ export default function TicketDetailPage() {
       setTicket(await ticketsApi.update(id, input));
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : 'Could not update the ticket');
-    }
-  }
-
-  async function send() {
-    const body = text.trim();
-    if (!body || !ticket) return;
-    setSending(true);
-    setActionError(null);
-    try {
-      if (mode === 'NOTE') {
-        await ticketsApi.addNote(id, body);
-      } else if (activeParticipant) {
-        await ticketsApi.reply(id, { participantId: activeParticipant.id, channel: mode, text: body });
-      }
-      setText('');
-      load();
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Could not send');
-    } finally {
-      setSending(false);
     }
   }
 
@@ -203,18 +160,6 @@ export default function TicketDetailPage() {
 
   const Source = SOURCE_META[ticket.source];
   const isClosed = ticket.status === 'RESOLVED' || ticket.status === 'CLOSED';
-  const modeLabel: Record<Mode, string> = {
-    DM: options?.dmMode === 'PRIVATE_REPLY' ? 'Private reply' : 'Direct message',
-    PUBLIC_REPLY: 'Public reply',
-    NOTE: 'Internal note',
-  };
-  const disabledReason =
-    mode === 'DM' && options?.dmMode === null
-      ? options.dmUnavailableReason
-      : mode === 'PUBLIC_REPLY' && options && !options.canPublicReply
-        ? 'This person has no comment to reply to publicly.'
-        : null;
-
   return (
     <div className="mx-auto max-w-6xl">
       <Link href="/app/tickets" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -237,7 +182,17 @@ export default function TicketDetailPage() {
             <PriorityBadge priority={ticket.priority} />
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex">
+            <span className={cn('size-1.5 rounded-full', live === 'live' ? 'bg-success' : 'bg-muted-foreground')} />
+            {live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Reconnecting'}
+          </span>
+          <Button variant="outline" asChild>
+            <Link href={`/app/tickets/${ticket.id}/chat`}>
+              <ChatCircleDots size={16} />
+              Open full chat
+            </Link>
+          </Button>
           {isClosed ? (
             <Button variant="outline" onClick={() => patch({ status: 'OPEN' })}>
               Reopen
@@ -261,127 +216,19 @@ export default function TicketDetailPage() {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <section aria-label="Conversation" className="flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-card">
           <div className="flex max-h-[62dvh] min-h-64 flex-col gap-4 overflow-y-auto p-5">
-            {ticket.messages.map((m) => {
-              const p = m.participantId ? participantById.get(m.participantId) : undefined;
-              if (m.kind === 'NOTE') {
-                return (
-                  <div key={m.id} className="rounded-[var(--radius-control)] border border-dashed border-border bg-muted px-4 py-3">
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <NotePencil size={13} />
-                      Internal note by {m.author?.name || 'a teammate'}, {timeAgo(m.createdAt)}
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-foreground">{m.text}</p>
-                  </div>
-                );
-              }
-              const outbound = m.kind === 'OUTBOUND';
-              return (
-                <div key={m.id} className={cn('flex gap-3', outbound && 'flex-row-reverse')}>
-                  <Avatar className="size-8 shrink-0">
-                    <AvatarFallback className="text-[0.6875rem]">
-                      {outbound ? initials(m.author?.name, 'Y') : initials(p?.username, '?')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className={cn('flex max-w-[80%] flex-col gap-1', outbound && 'items-end')}>
-                    <p className="text-xs text-muted-foreground">
-                      {outbound ? m.author?.name || 'Your team' : p?.username ? `@${p.username}` : 'Customer'}
-                      {', '}
-                      {CHANNEL_LABEL[m.channel]}
-                      {outbound && p?.username ? ` to @${p.username}` : ''}, {timeAgo(m.createdAt)}
-                    </p>
-                    <p
-                      className={cn(
-                        'whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 text-sm',
-                        outbound ? 'bg-accent text-accent-foreground' : 'bg-muted text-foreground',
-                        m.status === 'FAILED' && 'opacity-60',
-                      )}
-                    >
-                      {m.text}
-                    </p>
-                    {m.status === 'FAILED' && (
-                      <p className="flex items-center gap-1 text-xs text-danger">
-                        <WarningCircle size={12} />
-                        Not delivered: {m.error ?? 'Instagram rejected the message'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            <ThreadView items={thread} participants={ticket.participants} />
             <div ref={threadEnd} />
           </div>
 
           <Separator />
 
-          <div className="flex flex-col gap-3 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              {(['DM', 'PUBLIC_REPLY', 'NOTE'] as Mode[]).map((m) => {
-                const on = mode === m;
-                const ok = modeAvailable(m);
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    disabled={!ok}
-                    onClick={() => setMode(m)}
-                    className={cn(
-                      'rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-                      on ? 'border-accent bg-accent text-accent-foreground' : 'border-border text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {modeLabel[m]}
-                  </button>
-                );
-              })}
-              {ticket.participants.length > 1 && mode !== 'NOTE' && (
-                <Select
-                  aria-label="Reply to"
-                  value={activeParticipant?.id ?? ''}
-                  className="ml-auto h-8 max-w-48 text-xs"
-                  onChange={(e) => setParticipantId(e.target.value)}
-                >
-                  {ticket.participants.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      Reply to @{p.username ?? 'unknown'}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </div>
-
-            {mode === 'DM' && options?.dmMode === 'PRIVATE_REPLY' && (
-              <p className="text-xs text-muted-foreground">
-                Instagram allows only one private reply to a comment. After it, they can reply and you can chat normally.
-              </p>
-            )}
-            {disabledReason && (
-              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <LockSimple size={13} className="mt-px shrink-0" />
-                {disabledReason}
-              </p>
-            )}
-
-            <Textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') void send();
-              }}
-              rows={3}
-              maxLength={mode === 'NOTE' ? 4000 : 1000}
-              disabled={Boolean(disabledReason) && mode !== 'NOTE'}
-              placeholder={mode === 'NOTE' ? 'Write a note only your team can see' : 'Write a reply'}
-              aria-label="Message"
-              className="min-h-20 resize-none"
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Ctrl or Cmd + Enter to send</span>
-              <Button onClick={() => void send()} disabled={sending || !text.trim() || (Boolean(disabledReason) && mode !== 'NOTE')}>
-                {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneRight size={16} />}
-                {mode === 'NOTE' ? 'Add note' : 'Send'}
-              </Button>
-            </div>
-          </div>
+          <TicketComposer
+            ticket={ticket}
+            participantId={participantId}
+            onParticipantChange={setParticipantId}
+            onSent={load}
+            onError={setActionError}
+          />
         </section>
 
         <aside className="flex flex-col gap-4">
@@ -452,6 +299,8 @@ export default function TicketDetailPage() {
                     <p className="text-xs text-muted-foreground">
                       {p.replyOptions.dmMode === 'DM'
                         ? 'Can message now'
+                        : p.replyOptions.dmMode === 'HUMAN_AGENT'
+                          ? 'Can message (human agent, 7 days)'
                         : p.replyOptions.dmMode === 'PRIVATE_REPLY'
                           ? 'One private reply available'
                           : 'Cannot message'}

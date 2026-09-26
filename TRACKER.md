@@ -1687,6 +1687,14 @@ Status: built and unit-tested, applied to the local database, **not deployed**
   "Continue editing".
 - 🟡 Steps can be reordered (drag handle or arrows), each with its own buttons.
 
+### Phase 5.6 - Ticket real-time, long replies, chat page (user directive, 2026-09-29)
+
+- 🟡 Real-time: workers/API publish ids-only events on Redis `convozy:tickets:events`; API streams SSE at `GET /tickets/stream` (workspace + account filtered); dashboard uses fetch-streaming with reconnect, 60s poll as fallback.
+- 🟡 Replies beyond 24h: Instagram Human Agent tag allows a person-written DM up to 7 days after the customer's last message. **Requires Meta's "Human Agent" permission via App Review (pending); until approved, sends may be rejected and the error is shown to the agent.** Past 7 days only the customer messaging again reopens the thread; UI offers a public "message us again" reply.
+- 🟡 Full chat page `/app/tickets/[id]/chat`: complete Instagram DM history (Graph conversations API) merged with ticket comments, replies and notes.
+- 🟡 Resolved rule: once a post's ticket is RESOLVED/CLOSED, later comments on that post create no ticket and reopen nothing.
+- Not verified against production yet; mark done after deploy check.
+
 ## Phase 6 — AI features
 
 - ☐ `AiProvider` interface + first implementation

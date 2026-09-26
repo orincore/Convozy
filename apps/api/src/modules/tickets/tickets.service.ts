@@ -18,6 +18,7 @@ import { InstagramService } from '../instagram/instagram.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { TeamService } from '../team/team.service';
+import { TicketEventsService, TicketLiveEvent } from './ticket-events.service';
 import { ListTicketsQueryDto } from './dto/list-tickets.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { UpdateTicketSettingsDto } from './dto/update-settings.dto';
@@ -28,13 +29,15 @@ import { NoteDto, ReplyDto } from './dto/reply.dto';
 // only once and only within 7 days of that comment.
 const DM_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// The HUMAN_AGENT tag lets a person reply up to 7 days after the customer's last message.
+const HUMAN_AGENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const CLOSED_STATUSES: TicketStatus[] = [TicketStatus.RESOLVED, TicketStatus.CLOSED];
 
 export interface ReplyOptions {
   canPublicReply: boolean;
   // How a DM would go out right now, or null with the reason it can't.
-  dmMode: 'DM' | 'PRIVATE_REPLY' | null;
+  dmMode: 'DM' | 'HUMAN_AGENT' | 'PRIVATE_REPLY' | null;
   dmUnavailableReason: string | null;
 }
 
@@ -58,8 +61,13 @@ export function computeReplyOptions(p: Pick<TicketParticipant, 'igScopedId' | 'l
       dmUnavailableReason: 'Instagram does not share this person’s ID for tagged posts, so you cannot message them from here.',
     };
   }
-  if (p.lastInboundAt && now.getTime() - p.lastInboundAt.getTime() < DM_WINDOW_MS) {
+  const sinceInbound = p.lastInboundAt ? now.getTime() - p.lastInboundAt.getTime() : null;
+  if (sinceInbound !== null && sinceInbound < DM_WINDOW_MS) {
     return { canPublicReply, dmMode: 'DM', dmUnavailableReason: null };
+  }
+  // Past 24h but within 7 days of their last message: a person can still reply with the Human Agent tag.
+  if (sinceInbound !== null && sinceInbound < HUMAN_AGENT_WINDOW_MS) {
+    return { canPublicReply, dmMode: 'HUMAN_AGENT', dmUnavailableReason: null };
   }
   if (
     p.latestCommentId &&
@@ -74,7 +82,9 @@ export function computeReplyOptions(p: Pick<TicketParticipant, 'igScopedId' | 'l
     dmMode: null,
     dmUnavailableReason: p.privateReplySentAt
       ? 'You already sent the one private reply Instagram allows for this comment. You can message them again once they reply.'
-      : 'The 24-hour messaging window has closed. You can message them again once they message you.',
+      : sinceInbound !== null
+        ? 'It has been more than 7 days since they last messaged you, the longest Instagram allows. Reply publicly under their comment asking them to message you again, and you can carry on once they do.'
+        : 'They have not messaged you yet, so a direct message is not possible. Reply publicly under their comment, or wait for them to message you.',
   };
 }
 
@@ -100,7 +110,12 @@ export class TicketsService {
     private readonly messagingService: MessagingService,
     private readonly contactsService: ContactsService,
     private readonly teamService: TeamService,
+    private readonly liveEvents: TicketEventsService,
   ) {}
+
+  private notify(ticket: { id: string; workspaceId: string; instagramAccountId: string }, reason: TicketLiveEvent['reason']): void {
+    void this.liveEvents.publish({ workspaceId: ticket.workspaceId, instagramAccountId: ticket.instagramAccountId, ticketId: ticket.id, reason });
+  }
 
   // ── Settings ────────────────────────────────────────────────────────────
 
@@ -160,6 +175,9 @@ export class TicketsService {
         where: { instagramAccountId_dedupKey: { instagramAccountId: event.instagramAccountId, dedupKey } },
         include: { participants: { select: { igScopedId: true } } },
       });
+      // Once a post's ticket is resolved, later complaints on that post are
+      // ignored: no new ticket and no reopening (an agent can still reopen by hand).
+      if (existing && CLOSED_STATUSES.includes(existing.status)) return;
       const alreadyOn = existing?.participants.some((p) => p.igScopedId === igScopedId) ?? false;
       if (!qualifies && !alreadyOn) return;
       await this.ingest({
@@ -181,7 +199,8 @@ export class TicketsService {
       // A DM from someone already on a ticket continues that conversation,
       // whatever it says. Otherwise it needs a keyword (or "all DMs").
       const ongoing = await this.prisma.ticketParticipant.findFirst({
-        where: { igScopedId, ticket: { instagramAccountId: event.instagramAccountId, status: { not: TicketStatus.CLOSED } } },
+        // Resolved/closed tickets don't take new messages: a post that was resolved stays quiet.
+        where: { igScopedId, ticket: { instagramAccountId: event.instagramAccountId, status: { notIn: CLOSED_STATUSES } } },
         orderBy: { ticket: { lastActivityAt: 'desc' } },
         include: { ticket: true },
       });
@@ -262,6 +281,8 @@ export class TicketsService {
     let ticket = await this.prisma.ticket.findUnique({
       where: { instagramAccountId_dedupKey: { instagramAccountId, dedupKey } },
     });
+    // A resolved post ticket stays resolved: nothing reopens or replaces it.
+    if (ticket && dedupKey.startsWith('media:') && CLOSED_STATUSES.includes(ticket.status)) return;
     let created = false;
     if (!ticket) {
       ({ ticket, created } = await this.createTicket(target));
@@ -332,6 +353,7 @@ export class TicketsService {
         data: { ticketId: ticket.id, type: 'REOPENED', data: { from: ticket.status, reason: 'New message' } },
       });
     }
+    this.notify(ticket, created ? 'created' : 'message');
   }
 
   private async createTicket(target: IngestTarget & { mediaPermalink?: string | null }): Promise<{ ticket: Ticket; created: boolean }> {
@@ -507,12 +529,13 @@ export class TicketsService {
         where: { id },
         data: { ...data, events: { create: events.map((e) => ({ ...e, actorUserId: user.userId })) } },
       });
+      this.notify(ticket, 'updated');
     }
     return this.get(workspaceId, id);
   }
 
   async addNote(workspaceId: string, user: RequestUser, id: string, dto: NoteDto) {
-    await this.getOwned(workspaceId, id);
+    const ticket = await this.getOwned(workspaceId, id);
     const note = await this.prisma.ticketMessage.create({
       data: {
         ticketId: id,
@@ -524,6 +547,7 @@ export class TicketsService {
       include: { author: { select: { id: true, name: true } } },
     });
     await this.prisma.ticket.update({ where: { id }, data: { lastActivityAt: new Date() } });
+    this.notify(ticket, 'note');
     return note;
   }
 
@@ -542,6 +566,7 @@ export class TicketsService {
     let job: { recipientType: 'comment' | 'user'; recipientId: string; actionType: ActionType };
     let channel: TicketMessageChannel;
     let usedPrivateReply = false;
+    let humanAgent = false;
 
     if (dto.channel === 'PUBLIC_REPLY') {
       if (!options.canPublicReply || !participant.latestCommentId) {
@@ -554,6 +579,7 @@ export class TicketsService {
         throw new AppException('DM_NOT_ALLOWED', options.dmUnavailableReason ?? 'You cannot message this person right now.');
       }
       usedPrivateReply = options.dmMode === 'PRIVATE_REPLY';
+      humanAgent = options.dmMode === 'HUMAN_AGENT';
       job = usedPrivateReply
         ? { recipientType: 'comment', recipientId: participant.latestCommentId as string, actionType: ActionType.SEND_DM }
         : { recipientType: 'user', recipientId: participant.igScopedId, actionType: ActionType.SEND_DM };
@@ -564,6 +590,7 @@ export class TicketsService {
       workspaceId,
       instagramAccountId: ticket.instagramAccountId,
       ...job,
+      ...(humanAgent ? { humanAgent: true } : {}),
       content: { text },
     });
 
@@ -577,7 +604,7 @@ export class TicketsService {
         text,
         externalId: !failed ? result.externalId : null,
         status: failed ? TicketMessageStatus.FAILED : TicketMessageStatus.SENT,
-        error: failed ? result.error : null,
+        error: failed ? (humanAgent ? `Instagram did not accept this Human Agent message: ${result.error}` : result.error) : null,
         authorUserId: user.userId,
       },
       include: { author: { select: { id: true, name: true } } },
@@ -603,7 +630,26 @@ export class TicketsService {
         },
       });
     }
+    this.notify(ticket, 'reply');
     return message;
+  }
+
+  /**
+   * The complete DM thread with one person on a ticket, read live from Instagram so it
+   * includes everything before the ticket existed (automation messages, replies typed
+   * in the Instagram app). `available` is false when Instagram can't be reached.
+   */
+  async getHistory(workspaceId: string, id: string, participantId: string) {
+    const ticket = await this.getOwned(workspaceId, id);
+    const participant = await this.prisma.ticketParticipant.findFirst({ where: { id: participantId, ticketId: id } });
+    if (!participant) {
+      throw new NotFoundAppException('PARTICIPANT_NOT_FOUND', 'That person is not on this ticket.');
+    }
+    if (!participant.igScopedId) {
+      return { available: true, messages: [] };
+    }
+    const messages = await this.instagramService.fetchDmHistory(ticket.instagramAccountId, participant.igScopedId);
+    return messages === null ? { available: false, messages: [] } : { available: true, messages };
   }
 
   private async getOwned(workspaceId: string, id: string): Promise<Ticket> {

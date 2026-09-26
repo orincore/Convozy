@@ -19,6 +19,9 @@ export interface MessageSendJobData {
   actionType: ActionType;
   content: Record<string, unknown>;
   commentEventId?: string;
+  // Send with Instagram's HUMAN_AGENT message tag (a person replying up to 7 days
+  // after the customer's last message). Never set for automated sends.
+  humanAgent?: boolean;
   // How many times this specific job has been re-queued after exhausting
   // BullMQ's own retries — set by the DLQ requeue scan below, not by callers.
   requeueRound?: number;

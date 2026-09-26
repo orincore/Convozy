@@ -5,11 +5,12 @@ import { ContactsModule } from '../contacts/contacts.module';
 import { TeamModule } from '../team/team.module';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
+import { TicketEventsService } from './ticket-events.service';
 
 @Module({
   imports: [InstagramModule, MessagingModule, ContactsModule, TeamModule],
   controllers: [TicketsController],
-  providers: [TicketsService],
+  providers: [TicketsService, TicketEventsService],
   exports: [TicketsService],
 })
 export class TicketsModule {}

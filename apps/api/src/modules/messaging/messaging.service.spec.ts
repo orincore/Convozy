@@ -438,3 +438,58 @@ describe('MessagingService.send', () => {
     );
   });
 });
+
+describe('MessagingService.sendManual', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  const job = (extra: Record<string, unknown> = {}) => ({
+    workspaceId: 'workspace-1',
+    instagramAccountId: 'account-1',
+    recipientId: 'igsid-1',
+    recipientType: 'user' as const,
+    actionType: ActionType.SEND_DM,
+    content: { text: 'We fixed it' },
+    ...extra,
+  });
+
+  it('adds the HUMAN_AGENT message tag for a human reply outside the 24h window', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ message_id: 'mid-9' }) }) as any;
+
+    const result = await service.sendManual(job({ humanAgent: true }));
+
+    expect(result).toEqual({ status: 'SENT', externalId: 'mid-9' });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: JSON.stringify({ recipient: { id: 'igsid-1' }, message: { text: 'We fixed it' }, messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' }),
+      }),
+    );
+  });
+
+  it('sends a normal reply with no tag', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ message_id: 'mid-1' }) }) as any;
+
+    await service.sendManual(job());
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ body: JSON.stringify({ recipient: { id: 'igsid-1' }, message: { text: 'We fixed it' } }) }),
+    );
+  });
+
+  it('returns Instagram’s error to the agent instead of retrying', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: { message: 'Not allowed' } }) }) as any;
+
+    const result = await service.sendManual(job({ humanAgent: true }));
+
+    expect(result).toEqual({ status: 'FAILED', error: 'Not allowed' });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});

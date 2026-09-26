@@ -206,7 +206,14 @@ export class MessagingService {
       // the fully-verified shape for Button Template messages.
       return this.postGraphApi(
         `${credentials.igBusinessId}/messages`,
-        { recipient: { id: data.recipientId }, message },
+        {
+          recipient: { id: data.recipientId },
+          message,
+          // Outside the 24h window a person may still reply for up to 7 days by
+          // sending the HUMAN_AGENT tag (Send API: "Required for Instagram
+          // Messaging API"; needs the Human Agent permission approved for the app).
+          ...(data.humanAgent ? { messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+        },
         credentials.accessToken,
         version,
       );

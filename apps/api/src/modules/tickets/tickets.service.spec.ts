@@ -98,8 +98,9 @@ function makeService(settings: Record<string, unknown> = {}) {
     recordOutbound: jest.fn().mockResolvedValue(undefined),
   } as any;
   const teamService = { getMember: jest.fn().mockResolvedValue({ id: 'user-2' }) } as any;
-  const service = new TicketsService(prisma, instagramService, messagingService, contactsService, teamService);
-  return { service, prisma, instagramService, messagingService, contactsService, teamService };
+  const liveEvents = { publish: jest.fn().mockResolvedValue(undefined) } as any;
+  const service = new TicketsService(prisma, instagramService, messagingService, contactsService, teamService, liveEvents);
+  return { service, prisma, instagramService, messagingService, contactsService, teamService, liveEvents };
 }
 
 describe('matchesKeyword', () => {
@@ -129,10 +130,17 @@ describe('computeReplyOptions', () => {
     expect(o.dmUnavailableReason).toMatch(/one private reply/);
   });
 
-  it('refuses once both windows have closed', () => {
-    const o = computeReplyOptions({ ...base, lastInboundAt: hoursAgo(30), latestCommentId: 'c1', latestCommentAt: daysAgo(9) }, NOW);
+  it('past 24h but within 7 days of their last message, a person can still reply with the Human Agent tag', () => {
+    const o = computeReplyOptions({ ...base, lastInboundAt: hoursAgo(30) }, NOW);
+    expect(o.dmMode).toBe('HUMAN_AGENT');
+    expect(computeReplyOptions({ ...base, lastInboundAt: daysAgo(6) }, NOW).dmMode).toBe('HUMAN_AGENT');
+  });
+
+  it('after 7 days nothing but their own new message reopens a chat, and says so', () => {
+    const o = computeReplyOptions({ ...base, lastInboundAt: daysAgo(8), latestCommentId: 'c1', latestCommentAt: daysAgo(9) }, NOW);
     expect(o.dmMode).toBeNull();
-    expect(o.dmUnavailableReason).toMatch(/24-hour/);
+    expect(o.dmUnavailableReason).toMatch(/more than 7 days/);
+    expect(o.canPublicReply).toBe(true);
   });
 
   it('cannot message anyone without an IG-scoped id (tagged posts)', () => {
@@ -166,6 +174,15 @@ describe('TicketsService.ingestEvent', () => {
     await service.ingestEvent('event-1');
 
     expect(prisma.ticket.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes a live event when a message lands on a ticket', async () => {
+    const { service, prisma, liveEvents } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ text: 'I want a refund' }));
+
+    await service.ingestEvent('event-1');
+
+    expect(liveEvents.publish).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws-1', instagramAccountId: 'acc-1', reason: 'created' }));
   });
 
   it('ignores an ordinary comment', async () => {
@@ -205,18 +222,42 @@ describe('TicketsService.ingestEvent', () => {
     expect(prisma.ticketEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'PARTICIPANT_JOINED' }) }));
   });
 
-  it('reopens a resolved ticket when the post is complained about again', async () => {
-    const { service, prisma } = makeService();
-    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent());
-    prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', status: TicketStatus.RESOLVED, participants: [] });
+  it('ignores further complaints on a post whose ticket is resolved: no new ticket and no reopening', async () => {
+    const { service, prisma, liveEvents } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ fromIgScopedId: 'brand-new-person' }));
+    prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', status: TicketStatus.RESOLVED, participants: [{ igScopedId: 'igsid-1' }] });
 
     await service.ingestEvent('event-1');
 
     expect(prisma.ticket.create).not.toHaveBeenCalled();
-    expect(prisma.ticket.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: TicketStatus.OPEN, resolvedAt: null }) }),
-    );
-    expect(prisma.ticketEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: 'REOPENED' }) }));
+    expect(prisma.ticket.update).not.toHaveBeenCalled();
+    expect(prisma.ticketMessage.create).not.toHaveBeenCalled();
+    expect(prisma.ticketEvent.create).not.toHaveBeenCalled();
+    expect(liveEvents.publish).not.toHaveBeenCalled();
+  });
+
+  it('also ignores a closed post ticket, and a tagged post whose ticket is resolved', async () => {
+    const closed = makeService();
+    closed.prisma.commentEvent.findUnique.mockResolvedValue(makeEvent());
+    closed.prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', status: TicketStatus.CLOSED, participants: [] });
+    await closed.service.ingestEvent('event-1');
+    expect(closed.prisma.ticketMessage.create).not.toHaveBeenCalled();
+
+    const tagged = makeService();
+    tagged.prisma.instagramAccount = { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'ws-1' }) };
+    tagged.prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-9', status: TicketStatus.RESOLVED, participants: [] });
+    await tagged.service.ingestTaggedPost('acc-1', { id: 'tag-1', caption: 'again', permalink: null, username: 'x', timestamp: null });
+    expect(tagged.prisma.ticketMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('still lets an open post ticket take new complaints', async () => {
+    const { service, prisma } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ fromIgScopedId: 'igsid-2', fromUsername: 'other', externalEventId: 'ext-5' }));
+    prisma.ticket.findUnique.mockResolvedValue({ id: 'ticket-1', status: TicketStatus.IN_PROGRESS, participants: [] });
+
+    await service.ingestEvent('event-1');
+
+    expect(prisma.ticketMessage.create).toHaveBeenCalledTimes(1);
   });
 
   it('lets someone already on the ticket keep commenting without any keyword', async () => {
@@ -322,6 +363,39 @@ describe('TicketsService per-account scoping', () => {
   });
 });
 
+describe('TicketsService.getHistory', () => {
+  it('reads the whole DM thread from Instagram for a person on the ticket', async () => {
+    const { service, prisma, instagramService } = makeService();
+    prisma.ticket.findFirst.mockResolvedValue({ id: 'ticket-1', workspaceId: 'ws-1', instagramAccountId: 'acc-1' });
+    prisma.ticketParticipant.findFirst.mockResolvedValue({ id: 'part-1', ticketId: 'ticket-1', igScopedId: 'igsid-1' });
+    instagramService.fetchDmHistory = jest.fn().mockResolvedValue([{ id: 'm1', text: 'hi', fromCustomer: true, createdAt: 'x', hasAttachment: false }]);
+
+    const result = await service.getHistory('ws-1', 'ticket-1', 'part-1');
+
+    expect(instagramService.fetchDmHistory).toHaveBeenCalledWith('acc-1', 'igsid-1');
+    expect(result).toEqual({ available: true, messages: [expect.objectContaining({ id: 'm1' })] });
+  });
+
+  it('says so when Instagram cannot be reached instead of failing the page', async () => {
+    const { service, prisma, instagramService } = makeService();
+    prisma.ticket.findFirst.mockResolvedValue({ id: 'ticket-1', workspaceId: 'ws-1', instagramAccountId: 'acc-1' });
+    prisma.ticketParticipant.findFirst.mockResolvedValue({ id: 'part-1', ticketId: 'ticket-1', igScopedId: 'igsid-1' });
+    instagramService.fetchDmHistory = jest.fn().mockResolvedValue(null);
+
+    await expect(service.getHistory('ws-1', 'ticket-1', 'part-1')).resolves.toEqual({ available: false, messages: [] });
+  });
+
+  it('has no thread for someone we cannot message (tagged posts)', async () => {
+    const { service, prisma, instagramService } = makeService();
+    prisma.ticket.findFirst.mockResolvedValue({ id: 'ticket-1', workspaceId: 'ws-1', instagramAccountId: 'acc-1' });
+    prisma.ticketParticipant.findFirst.mockResolvedValue({ id: 'part-1', ticketId: 'ticket-1', igScopedId: null });
+    instagramService.fetchDmHistory = jest.fn();
+
+    await expect(service.getHistory('ws-1', 'ticket-1', 'part-1')).resolves.toEqual({ available: true, messages: [] });
+    expect(instagramService.fetchDmHistory).not.toHaveBeenCalled();
+  });
+});
+
 describe('TicketsService.ingestTaggedPost', () => {
   it('creates a read-only ticket keyed on the tagged media, with no messageable participant', async () => {
     const { service, prisma } = makeService();
@@ -386,10 +460,49 @@ describe('TicketsService.reply', () => {
   });
 
   it('refuses a DM when no window is open and does not call Instagram', async () => {
-    const { service, messagingService } = setup({ lastInboundAt: daysAgo(5) });
+    const { service, messagingService } = setup({ lastInboundAt: daysAgo(9) });
 
     await expect(service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi' })).rejects.toThrow(AppException);
     expect(messagingService.sendManual).not.toHaveBeenCalled();
+  });
+
+  it('replies with the Human Agent tag once 24h have passed but 7 days have not', async () => {
+    const { service, prisma, messagingService } = setup({ lastInboundAt: daysAgo(3) });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'We fixed it, please check' });
+
+    expect(messagingService.sendManual).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientType: 'user', recipientId: 'igsid-1', actionType: 'SEND_DM', humanAgent: true }),
+    );
+    // A normal in-window DM does not carry the tag.
+    expect(prisma.ticketMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'SENT' }) }));
+  });
+
+  it('does not use the Human Agent tag inside the 24h window', async () => {
+    const { service, messagingService } = setup({ lastInboundAt: new Date() });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi' });
+
+    expect(messagingService.sendManual.mock.calls[0][0].humanAgent).toBeUndefined();
+  });
+
+  it('explains a rejected Human Agent message, since it needs the approved permission', async () => {
+    const { service, prisma, messagingService } = setup({ lastInboundAt: daysAgo(3) });
+    messagingService.sendManual.mockResolvedValue({ status: 'FAILED', error: '(#10) Application does not have permission' });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hello' });
+
+    expect(prisma.ticketMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'FAILED', error: expect.stringContaining('Human Agent') }) }),
+    );
+  });
+
+  it('tells connected browsers about the new reply', async () => {
+    const { service, liveEvents } = setup({ lastInboundAt: new Date() });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi' });
+
+    expect(liveEvents.publish).toHaveBeenCalledWith({ workspaceId: 'ws-1', instagramAccountId: 'acc-1', ticketId: 'ticket-1', reason: 'reply' });
   });
 
   it('sends a public reply under their latest comment', async () => {
