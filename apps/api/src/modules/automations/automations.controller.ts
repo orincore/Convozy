@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { AccountId } from '../../common/decorators/account-id.decorator';
 import { AccountScopeGuard } from '../../common/guards/account-scope.guard';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { AutomationsService } from './automations.service';
 import { CreateAutomationDto } from './dto/create-automation.dto';
 import { UpdateAutomationDto } from './dto/update-automation.dto';
+import { CreateDraftDto, UpdateDraftDto } from './dto/save-draft.dto';
 
 @Controller('automations')
 @UseGuards(AccountScopeGuard)
@@ -14,6 +15,17 @@ export class AutomationsController {
   @Get()
   list(@CurrentUser() user: RequestUser, @AccountId() accountId: string) {
     return this.automationsService.list(user.workspaceId, accountId);
+  }
+
+  @Post('drafts')
+  createDraft(@CurrentUser() user: RequestUser, @AccountId() accountId: string, @Body() dto: CreateDraftDto) {
+    // A draft always belongs to the selected account, whatever the body says.
+    return this.automationsService.createDraft(user.workspaceId, { ...dto, instagramAccountId: accountId });
+  }
+
+  @Put(':id/draft')
+  updateDraft(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateDraftDto) {
+    return this.automationsService.updateDraft(user.workspaceId, id, dto);
   }
 
   @Get(':id')

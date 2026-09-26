@@ -1747,3 +1747,76 @@ describe('AutomationsService.list account scoping', () => {
     );
   });
 });
+
+
+describe('AutomationsService drafts', () => {
+  const data = { step: 'build', name: 'WIP', actionSteps: [{ text: '' }] };
+
+  it('saves a draft with no triggers or actions, so it can never match or send', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create = jest.fn().mockResolvedValue({ id: 'draft-1' });
+    prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'draft-1', workspaceId: 'workspace-1', status: AutomationStatus.DRAFT, triggers: [], actions: [] });
+
+    await service.createDraft('workspace-1', { name: ' My draft ', instagramAccountId: 'ig-account-1', data });
+
+    const created = prisma.automation.create.mock.calls[0][0].data;
+    expect(created).toEqual(expect.objectContaining({ workspaceId: 'workspace-1', status: AutomationStatus.DRAFT, name: 'My draft', draft: data }));
+    expect(created.triggers).toBeUndefined();
+    expect(created.actions).toBeUndefined();
+  });
+
+  it('refuses a draft for an account outside the workspace', async () => {
+    const { service, instagramService, prisma } = makeService();
+    instagramService.accountBelongsToWorkspace.mockResolvedValue(false);
+    prisma.automation.create = jest.fn();
+
+    await expect(service.createDraft('workspace-1', { instagramAccountId: 'foreign', data })).rejects.toThrow(NotFoundAppException);
+    expect(prisma.automation.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized draft', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create = jest.fn();
+
+    await expect(
+      service.createDraft('workspace-1', { instagramAccountId: 'ig-account-1', data: { blob: 'x'.repeat(300 * 1024) } }),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('only updates something that is still a draft', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'a1', workspaceId: 'workspace-1', status: AutomationStatus.ACTIVE, triggers: [], actions: [] });
+    prisma.automation.update = jest.fn();
+
+    await expect(service.updateDraft('workspace-1', 'a1', { data })).rejects.toThrow(AppException);
+    expect(prisma.automation.update).not.toHaveBeenCalled();
+  });
+
+  it('cannot go live without the full trigger and steps', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'd1', workspaceId: 'workspace-1', status: AutomationStatus.DRAFT, triggers: [], actions: [] });
+
+    await expect(service.update('workspace-1', 'd1', { status: AutomationStatus.ACTIVE } as any)).rejects.toThrow(AppException);
+  });
+
+  it('publishing a draft clears the saved builder state', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'd1', workspaceId: 'workspace-1', status: AutomationStatus.DRAFT, triggers: [], actions: [] });
+    const tx = {
+      trigger: { deleteMany: jest.fn() },
+      action: { deleteMany: jest.fn(), create: jest.fn().mockResolvedValue({ id: 'act-1' }) },
+      automation: { update: jest.fn() },
+    };
+    prisma.$transaction = jest.fn().mockImplementation((fn: any) => fn(tx));
+
+    await service.update('workspace-1', 'd1', {
+      status: AutomationStatus.ACTIVE,
+      triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['price'] }],
+      actions: [{ type: ActionType.SEND_DM, payload: { text: 'hi' } }],
+    } as any);
+
+    expect(tx.automation.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: AutomationStatus.ACTIVE, draft: expect.anything() }) }),
+    );
+  });
+});

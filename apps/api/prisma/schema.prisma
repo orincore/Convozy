@@ -161,6 +161,12 @@ model Automation {
   scopeMediaIds String[] // Instagram media IDs when scopeType = SPECIFIC_POSTS
   priority  Int @default(0) // higher runs first when multiple automations could match
 
+  // Work-in-progress builder state while status = DRAFT: the dashboard's own
+  // form model, saved as-is so an incomplete automation (no message yet, etc.)
+  // can be kept and resumed. Never read by matching/sending; publishing turns
+  // it into real triggers/actions through the normal validated path and clears it.
+  draft Json?
+
   triggers Trigger[]
   actions  Action[]
 

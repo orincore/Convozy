@@ -87,6 +87,9 @@ const CONVERSATION_SOURCES: TriggerSource[] = [
   TriggerSource.REFERRAL,
 ];
 
+// Cap on a saved draft's builder state (a few long messages with buttons is far below this).
+const MAX_DRAFT_BYTES = 256 * 1024;
+
 // A plain-DM trigger fires on every inbound message, so the same automation
 // answers a given sender at most once per this window - without it a
 // keyword-less DM automation would reply to every message in a conversation.
@@ -162,8 +165,54 @@ export class AutomationsService {
     return this.getOwnedAutomation(workspaceId, automationId);
   }
 
+  /**
+   * Saves work in progress. A draft has no triggers or actions (so it can never
+   * match or send); its builder state lives in `draft` until it is published.
+   */
+  async createDraft(workspaceId: string, dto: { name?: string; instagramAccountId: string; data: Record<string, unknown> }) {
+    if (!(await this.instagramService.accountBelongsToWorkspace(dto.instagramAccountId, workspaceId))) {
+      throw new NotFoundAppException('INSTAGRAM_ACCOUNT_NOT_FOUND', 'This Instagram account was not found in your workspace.');
+    }
+    this.assertDraftSize(dto.data);
+    const automation = await this.prisma.automation.create({
+      data: {
+        workspaceId,
+        instagramAccountId: dto.instagramAccountId,
+        name: dto.name?.trim() || 'Untitled draft',
+        status: AutomationStatus.DRAFT,
+        draft: dto.data as unknown as object,
+      },
+    });
+    return this.getOwnedAutomation(workspaceId, automation.id);
+  }
+
+  async updateDraft(workspaceId: string, id: string, dto: { name?: string; data: Record<string, unknown> }) {
+    const existing = await this.getOwnedAutomation(workspaceId, id);
+    if (existing.status !== AutomationStatus.DRAFT) {
+      throw new AppException('NOT_A_DRAFT', 'This automation is already published. Edit it directly instead.', 409);
+    }
+    this.assertDraftSize(dto.data);
+    await this.prisma.automation.update({
+      where: { id },
+      data: { name: dto.name?.trim() || existing.name, draft: dto.data as unknown as object },
+    });
+    return this.getOwnedAutomation(workspaceId, id);
+  }
+
+  private assertDraftSize(data: Record<string, unknown>): void {
+    if (JSON.stringify(data).length > MAX_DRAFT_BYTES) {
+      throw new AppException('DRAFT_TOO_LARGE', 'This draft is too large to save.');
+    }
+  }
+
   async update(workspaceId: string, id: string, dto: UpdateAutomationDto): Promise<AutomationWithRelations> {
-    await this.getOwnedAutomation(workspaceId, id);
+    const current = await this.getOwnedAutomation(workspaceId, id);
+    // A draft only goes live through the full, validated path: it has no
+    // triggers/actions of its own to activate.
+    const publishing = current.status === AutomationStatus.DRAFT && dto.status !== undefined && dto.status !== AutomationStatus.DRAFT;
+    if (publishing && (!dto.triggers || !dto.actions)) {
+      throw new AppException('DRAFT_INCOMPLETE', 'Finish the automation (trigger and steps) before publishing it.');
+    }
     if (dto.triggers) {
       this.validateTriggers(dto.triggers);
       await this.checkTriggerEntitlements(workspaceId, dto.triggers);
@@ -190,6 +239,8 @@ export class AutomationsService {
         data: {
           name: dto.name,
           status: dto.status,
+          // The builder state is only meaningful while it is a draft.
+          ...(publishing ? { draft: Prisma.DbNull } : {}),
           scopeType: dto.scopeType,
           scopeMediaIds: dto.scopeMediaIds,
           priority: dto.priority,

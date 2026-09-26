@@ -277,6 +277,8 @@ export interface Automation {
   scopeMediaIds: string[];
   priority: number;
   instagramAccountId: string;
+  // The builder's saved state while status is DRAFT (null otherwise).
+  draft?: Record<string, unknown> | null;
   triggers: (TriggerInput & { id: string })[];
   actions: AutomationAction[];
   createdAt: string;
@@ -301,6 +303,10 @@ export const automationsApi = {
     authFetch<Automation>('/automations', { method: 'POST', body: JSON.stringify(input) }),
   update: (id: string, input: Partial<CreateAutomationInput>) =>
     authFetch<Automation>(`/automations/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  createDraft: (input: { name?: string; instagramAccountId: string; data: Record<string, unknown> }) =>
+    authFetch<Automation>('/automations/drafts', { method: 'POST', body: JSON.stringify(input) }),
+  updateDraft: (id: string, input: { name?: string; data: Record<string, unknown> }) =>
+    authFetch<Automation>(`/automations/${id}/draft`, { method: 'PUT', body: JSON.stringify(input) }),
   remove: (id: string) => authFetch<void>(`/automations/${id}`, { method: 'DELETE' }),
 };
 

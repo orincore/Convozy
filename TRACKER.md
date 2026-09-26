@@ -1669,6 +1669,24 @@ would not show).
   private/incognito window, so `force_reauth` is the mechanism; if the popup is
   blocked it falls back to a full-page redirect.
 
+### Phase 5.5 - Automation wizard + drafts (user directive, 2026-09-29)
+
+Status: built and unit-tested, applied to the local database, **not deployed**
+(migration `20260929010000_automation_draft` is additive: nullable `Automation.draft`).
+
+- 🟡 Creating an automation is a 3-step wizard: choose posts, build (trigger +
+  steps), then an animated sample run with a phone preview and **Publish live**.
+  Editing an already-published automation keeps the single-page editor.
+- 🟡 Drafts: `POST /automations/drafts`, `PUT /automations/:id/draft`. A draft is an
+  automation with status DRAFT and no triggers/actions (so it can never match or
+  send); the builder state is stored in `draft` JSON (256 KB cap). Publishing
+  goes through the normal validated update and clears the draft. A draft cannot
+  be activated with a bare status change.
+- 🟡 Save draft button + autosave every 5 minutes (only when there are unsaved
+  changes; the toggle is remembered per browser). Drafts appear in the list with
+  "Continue editing".
+- 🟡 Steps can be reordered (drag handle or arrows), each with its own buttons.
+
 ## Phase 6 — AI features
 
 - ☐ `AiProvider` interface + first implementation

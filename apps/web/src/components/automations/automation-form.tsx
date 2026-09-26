@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, CaretRight, CheckCircle, CircleNotch, ImageSquare, MagicWand, PencilSimple, Plus, Trash, WarningCircle, X } from '@phosphor-icons/react';
+import { Reorder, useDragControls } from 'motion/react';
+import { ArrowDown, ArrowLeft, FloppyDisk, PaperPlaneTilt, ArrowUp, CaretRight, DotsSixVertical, CheckCircle, CircleNotch, ImageSquare, MagicWand, PencilSimple, Plus, Trash, WarningCircle, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { TemplateDialog } from '@/components/automations/template-dialog';
+import { AutomationFlowPreview } from '@/components/automations/automation-flow-preview';
+import { Switch } from '@/components/ui/switch';
 import { PhonePreview } from '@/components/automations/phone-preview';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
@@ -250,6 +253,110 @@ const STEP_LABELS: Record<string, string> = {
   CONDITION: 'If / else',
 };
 
+function StepCard({
+  node,
+  index,
+  total,
+  onMove,
+  onDelete,
+  children,
+}: {
+  node: ActionStepNode;
+  index: number;
+  total: number;
+  onMove: (direction: -1 | 1) => void;
+  onDelete: () => void;
+  children: React.ReactNode;
+}) {
+  const controls = useDragControls();
+  const iconButton =
+    'flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30';
+
+  return (
+    <Reorder.Item
+      value={node}
+      dragListener={false}
+      dragControls={controls}
+      whileDrag={{ scale: 1.01 }}
+      className="list-none rounded-[var(--radius-card)] border border-border bg-background"
+    >
+      <div className="flex items-center gap-1 border-b border-border px-3 py-2">
+        <button
+          type="button"
+          onPointerDown={(e) => controls.start(e)}
+          aria-label={`Drag to reorder step ${index + 1}`}
+          className={`${iconButton} cursor-grab touch-none active:cursor-grabbing`}
+        >
+          <DotsSixVertical size={18} weight="bold" />
+        </button>
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+          Step {index + 1}: {STEP_LABELS[node.type]}
+        </p>
+        <button type="button" onClick={() => onMove(-1)} disabled={index === 0} aria-label={`Move step ${index + 1} up`} className={iconButton}>
+          <ArrowUp size={15} />
+        </button>
+        <button type="button" onClick={() => onMove(1)} disabled={index === total - 1} aria-label={`Move step ${index + 1} down`} className={iconButton}>
+          <ArrowDown size={15} />
+        </button>
+        {total > 1 && (
+          <button type="button" onClick={onDelete} aria-label={`Delete step ${index + 1}`} className={`${iconButton} hover:text-danger`}>
+            <Trash size={15} />
+          </button>
+        )}
+      </div>
+      <div className="flex flex-col gap-4 p-4">{children}</div>
+    </Reorder.Item>
+  );
+}
+
+type WizardStep = 'posts' | 'build' | 'publish';
+
+const WIZARD_STEPS: { key: WizardStep; label: string }[] = [
+  { key: 'posts', label: 'Choose posts' },
+  { key: 'build', label: 'Build automation' },
+  { key: 'publish', label: 'Preview and publish' },
+];
+
+const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000;
+const AUTOSAVE_PREF_KEY = 'convozy_autosave_drafts';
+
+interface DraftData {
+  v: 1;
+  step: WizardStep;
+  name: string;
+  scopeType: AutomationScopeType;
+  selectedMediaIds: string[];
+  triggers: TriggerRow[];
+  actionSteps: ActionStepNode[];
+  appliedTemplateName: string | null;
+}
+
+/** Reads a saved draft back defensively: anything unexpected falls back to a fresh builder. */
+function readDraft(automation: Automation | undefined): DraftData | null {
+  const d = automation?.draft as Partial<DraftData> | null | undefined;
+  if (!d || !Array.isArray(d.triggers) || !Array.isArray(d.actionSteps) || d.triggers.length === 0 || d.actionSteps.length === 0) {
+    return null;
+  }
+  return {
+    v: 1,
+    step: d.step && WIZARD_STEPS.some((w) => w.key === d.step) ? d.step : 'posts',
+    name: typeof d.name === 'string' ? d.name : '',
+    scopeType: d.scopeType === 'SPECIFIC_POSTS' ? 'SPECIFIC_POSTS' : 'ALL_POSTS',
+    selectedMediaIds: Array.isArray(d.selectedMediaIds) ? d.selectedMediaIds : [],
+    triggers: d.triggers,
+    actionSteps: d.actionSteps,
+    appliedTemplateName: typeof d.appliedTemplateName === 'string' ? d.appliedTemplateName : null,
+  };
+}
+
+function relativeTime(date: Date, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - date.getTime()) / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)}h ago`;
+}
+
 interface AutomationFormProps {
   accounts: ConnectedAccount[];
   /** Present = edit an existing automation; absent = create a new one. */
@@ -258,24 +365,35 @@ interface AutomationFormProps {
 
 export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   const router = useRouter();
-  const isEdit = automation !== undefined;
+  // Editing a published automation keeps the single-page editor; creating one
+  // (or resuming a draft) goes through the three-step wizard.
+  const isEdit = automation !== undefined && automation.status !== 'DRAFT';
+  const wizard = !isEdit;
+  const restored = useMemo(() => (automation?.status === 'DRAFT' ? readDraft(automation) : null), [automation]);
 
   const [accountId, setAccountId] = useState(automation?.instagramAccountId ?? accounts[0]?.id ?? '');
-  const [name, setName] = useState(automation?.name ?? '');
+  const [name, setName] = useState(restored?.name ?? (isEdit ? automation.name : automation?.name === 'Untitled draft' ? '' : automation?.name ?? ''));
   const [triggers, setTriggers] = useState<TriggerRow[]>(
-    automation ? automationToTriggerRows(automation.triggers) : [emptyTrigger()],
+    restored?.triggers ?? (isEdit ? automationToTriggerRows(automation.triggers) : [emptyTrigger()]),
   );
   const [actionSteps, setActionSteps] = useState<ActionStepNode[]>(
-    automation ? deserializeActionSteps(automation.actions) : [emptyActionStep()],
+    restored?.actionSteps ?? (isEdit ? deserializeActionSteps(automation.actions) : [emptyActionStep()]),
   );
-  const [scopeType, setScopeType] = useState<AutomationScopeType>(automation?.scopeType ?? 'ALL_POSTS');
-  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>(automation?.scopeMediaIds ?? []);
-  const [templatesOpen, setTemplatesOpen] = useState(!isEdit);
+  const [scopeType, setScopeType] = useState<AutomationScopeType>(restored?.scopeType ?? automation?.scopeType ?? 'ALL_POSTS');
+  const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>(restored?.selectedMediaIds ?? automation?.scopeMediaIds ?? []);
+  const [templatesOpen, setTemplatesOpen] = useState(!isEdit && automation === undefined);
+  const [step, setStep] = useState<WizardStep>(restored?.step ?? 'posts');
+  const [draftId, setDraftId] = useState<string | null>(automation?.status === 'DRAFT' ? automation.id : null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(automation?.status === 'DRAFT' ? new Date(automation.updatedAt) : null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [autosave, setAutosave] = useState(true);
+  const savingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<AutomationTemplate[] | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
-  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(null);
+  const [appliedTemplateName, setAppliedTemplateName] = useState<string | null>(restored?.appliedTemplateName ?? null);
   // Offered as {{field.<key>}} merge tags in every message/reply field
   // (ActionStepEditor) — fetched once here rather than per-field so tapping
   // a tag chip doesn't wait on a network round trip. A fetch failure just
@@ -335,35 +453,149 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
 
   const includesStoryReply = triggers.some((t) => t.source === 'STORY_REPLY');
 
+  // What a draft stores. The step is kept out of the change check, since just
+  // moving between steps is not an edit worth saving.
+  const contentSnapshot = JSON.stringify({ name, scopeType, selectedMediaIds, triggers, actionSteps });
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(restored ? contentSnapshot : null);
+  const hasContent =
+    name.trim() !== '' ||
+    selectedMediaIds.length > 0 ||
+    triggers.some((t) => t.keywords.trim() !== '') ||
+    actionSteps.some((n) => n.text.trim() !== '' || n.buttons.length > 0 || n.media !== null || n.then.length > 0 || n.else.length > 0);
+  const dirty = wizard && hasContent && contentSnapshot !== savedSnapshot;
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(AUTOSAVE_PREF_KEY) === '0') setAutosave(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  function toggleAutosave(next: boolean) {
+    setAutosave(next);
+    try {
+      localStorage.setItem(AUTOSAVE_PREF_KEY, next ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveDraft(): Promise<boolean> {
+    if (!accountId || savingRef.current) return false;
+    savingRef.current = true;
+    setSavingDraft(true);
+    setDraftError(null);
+    const snapshot = contentSnapshot;
+    const data: Record<string, unknown> = { v: 1, step, name, scopeType, selectedMediaIds, triggers, actionSteps, appliedTemplateName };
+    const title = name.trim() || 'Untitled draft';
+    try {
+      if (draftId) {
+        await automationsApi.updateDraft(draftId, { name: title, data });
+      } else {
+        const created = await automationsApi.createDraft({ name: title, instagramAccountId: accountId, data });
+        setDraftId(created.id);
+      }
+      setSavedSnapshot(snapshot);
+      setLastSavedAt(new Date());
+      return true;
+    } catch (err) {
+      setDraftError(err instanceof ApiError ? err.message : 'Could not save the draft');
+      return false;
+    } finally {
+      savingRef.current = false;
+      setSavingDraft(false);
+    }
+  }
+
+  // The interval always calls the newest saveDraft (it closes over current state).
+  const autosaveRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    autosaveRef.current = () => {
+      if (dirty) void saveDraft();
+    };
+  });
+  useEffect(() => {
+    if (!wizard || !autosave) return;
+    const id = setInterval(() => autosaveRef.current(), AUTOSAVE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [wizard, autosave]);
+
+  // Re-render the "saved 2 min ago" label as time passes.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!lastSavedAt) return;
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, [lastSavedAt]);
+
+  function postsError(): string | null {
+    if (scopeType === 'SPECIFIC_POSTS' && selectedMediaIds.length === 0) {
+      return 'Pick at least one post, or switch to "All posts".';
+    }
+    return null;
+  }
+
+  function buildError(): string | null {
+    // Only REGEX needs a keyword: it's the pattern, there's no sensible
+    // "match anything" fallback. EXACT/CONTAINS with no keyword is a
+    // deliberate unconditional trigger (matches every comment).
+    if (triggers.some((t) => t.matchType === 'REGEX' && t.keywords.trim() === '')) {
+      return 'Regex triggers need a pattern.';
+    }
+    const actionStepsError = validateActionSteps(actionSteps);
+    if (actionStepsError) return actionStepsError;
+    if (scopeType === 'SPECIFIC_POSTS' && triggers.every((t) => CONVERSATION_ONLY_SOURCES.includes(t.source))) {
+      return 'DMs, story replies, story mentions and link clicks aren’t tied to a specific post. Go back and choose "All posts", or add a comment trigger too.';
+    }
+    return null;
+  }
+
+  function stepError(target: WizardStep): string | null {
+    if (target === 'posts') return postsError();
+    if (target === 'build') return buildError();
+    return null;
+  }
+
+  /** Moving forward needs every earlier step to be valid; moving back is always allowed. */
+  function goTo(target: WizardStep) {
+    const order = WIZARD_STEPS.map((w) => w.key);
+    if (order.indexOf(target) > order.indexOf(step)) {
+      for (const earlier of order.slice(0, order.indexOf(target))) {
+        const problem = stepError(earlier);
+        if (problem) {
+          setError(problem);
+          setStep(earlier);
+          return;
+        }
+      }
+    }
+    setError(null);
+    setStep(target);
+  }
+
+  function goNext() {
+    const i = WIZARD_STEPS.findIndex((w) => w.key === step);
+    if (i < WIZARD_STEPS.length - 1) goTo(WIZARD_STEPS[i + 1].key);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (wizard && step !== 'publish') {
+      goNext();
+      return;
+    }
     setError(null);
 
     if (!accountId) {
       setError('Connect an Instagram account first.');
       return;
     }
-    // Only REGEX needs a keyword — it's the pattern, there's no sensible
-    // "match anything" fallback. EXACT/CONTAINS with no keyword is a
-    // deliberate unconditional trigger (matches every comment).
-    if (triggers.some((t) => t.matchType === 'REGEX' && t.keywords.trim() === '')) {
-      setError('Regex triggers need a pattern.');
-      return;
-    }
-    const actionStepsError = validateActionSteps(actionSteps);
-    if (actionStepsError) {
-      setError(actionStepsError);
-      return;
-    }
-    if (scopeType === 'SPECIFIC_POSTS' && selectedMediaIds.length === 0) {
-      setError('Pick at least one post, or switch to "All posts".');
-      return;
-    }
-    if (
-      scopeType === 'SPECIFIC_POSTS' &&
-      triggers.every((t) => CONVERSATION_ONLY_SOURCES.includes(t.source))
-    ) {
-      setError('DMs, story replies, story mentions and link clicks aren’t tied to a specific post. Switch to "All posts" or add a comment trigger too.');
+    const problem = postsError() ?? buildError();
+    if (problem) {
+      setError(problem);
       return;
     }
 
@@ -387,10 +619,21 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           triggers: triggerInputs,
           actions: actionInputs,
         });
+      } else if (draftId) {
+        // Publishing a saved draft turns it into the live automation.
+        await automationsApi.update(draftId, {
+          name: name.trim() || 'Untitled automation',
+          status: 'ACTIVE',
+          scopeType,
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : [],
+          triggers: triggerInputs,
+          actions: actionInputs,
+        });
       } else {
         const input: CreateAutomationInput = {
           name: name.trim() || 'Untitled automation',
           instagramAccountId: accountId,
+          status: 'ACTIVE',
           scopeType,
           scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : undefined,
           triggers: triggerInputs,
@@ -400,7 +643,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
       }
       router.push('/app/automations');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : `Could not ${isEdit ? 'save' : 'create'} the automation`);
+      setError(err instanceof ApiError ? err.message : `Could not ${isEdit ? 'save' : 'publish'} the automation`);
       setSubmitting(false);
     }
   }
@@ -417,6 +660,17 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   }
 
   const account = accounts.find((acc) => acc.id === accountId);
+  function moveTopLevelStep(id: string, direction: -1 | 1) {
+    setActionSteps((current) => {
+      const from = current.findIndex((n) => n.id === id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= current.length) return current;
+      const next = [...current];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+  }
+
   function addTopLevelStep(type: 'SEND_DM' | 'CONDITION') {
     const node = emptyActionStep(type);
     setActionSteps((c) => addActionStep(c, null, null, node));
@@ -455,7 +709,33 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             </div>
             {!isEdit && <Badge>Draft</Badge>}
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {wizard && (
+              <div className="mr-1 flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="autosave"
+                    label="Autosave drafts every 5 minutes"
+                    checked={autosave}
+                    onCheckedChange={toggleAutosave}
+                  />
+                  <label htmlFor="autosave" className="hidden text-xs text-muted-foreground md:block">
+                    Autosave every 5 min
+                  </label>
+                </div>
+                <span role="status" className={`hidden text-xs sm:block ${draftError ? 'text-danger' : 'text-muted-foreground'}`}>
+                  {savingDraft
+                    ? 'Saving...'
+                    : draftError
+                      ? draftError
+                      : dirty
+                        ? 'Unsaved changes'
+                        : lastSavedAt
+                          ? `Draft saved ${relativeTime(lastSavedAt)}`
+                          : ''}
+                </span>
+              </div>
+            )}
             {!isEdit && (
               <Button type="button" variant="outline" size="sm" onClick={() => setTemplatesOpen(true)}>
                 <MagicWand size={14} />
@@ -465,10 +745,17 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             <Button type="button" variant="outline" asChild>
               <Link href="/app/automations">Cancel</Link>
             </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting && <CircleNotch size={16} className="animate-spin" />}
-              {isEdit ? 'Save changes' : 'Create automation'}
-            </Button>
+            {wizard ? (
+              <Button type="button" variant="outline" onClick={() => void saveDraft()} disabled={savingDraft || !hasContent}>
+                {savingDraft ? <CircleNotch size={16} className="animate-spin" /> : <FloppyDisk size={16} />}
+                Save draft
+              </Button>
+            ) : (
+              <Button type="submit" disabled={submitting}>
+                {submitting && <CircleNotch size={16} className="animate-spin" />}
+                Save changes
+              </Button>
+            )}
           </div>
         </header>
 
@@ -499,6 +786,96 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           </div>
         )}
 
+        {wizard && (
+          <ol aria-label="Steps" className="grid grid-cols-3 gap-2">
+            {WIZARD_STEPS.map((w, i) => {
+              const index = WIZARD_STEPS.findIndex((x) => x.key === step);
+              const current = w.key === step;
+              const done = i < index;
+              return (
+                <li key={w.key}>
+                  <button
+                    type="button"
+                    onClick={() => goTo(w.key)}
+                    aria-current={current ? 'step' : undefined}
+                    className={`flex w-full items-center gap-3 rounded-[var(--radius-control)] border px-3 py-2.5 text-left text-sm transition-colors ${
+                      current ? 'border-accent bg-muted text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span
+                      className={`flex size-6 shrink-0 items-center justify-center rounded-full border text-xs ${
+                        current ? 'border-accent bg-accent text-accent-foreground' : done ? 'border-success text-success' : 'border-border'
+                      }`}
+                    >
+                      {done ? <CheckCircle size={14} weight="fill" /> : i + 1}
+                    </span>
+                    <span className="min-w-0 truncate">{w.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        {wizard && step === 'posts' && (
+          <section aria-label="Choose posts" className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-2">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Which posts should this watch?</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Pick every post and reel, or only the ones you choose. This applies to comment triggers; DMs, story replies and link clicks are not tied to a post.
+              </p>
+            </div>
+            <PostPicker
+              accountId={accountId}
+              scopeType={scopeType}
+              onScopeTypeChange={(scope) => {
+                setScopeType(scope);
+                if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
+              }}
+              selectedMediaIds={selectedMediaIds}
+              onToggleMedia={toggleMedia}
+            />
+          </section>
+        )}
+
+        {wizard && step === 'publish' && (
+          <section aria-label="Preview and publish" className="flex flex-col gap-6 py-2">
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight">Preview and publish</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Watch how it will run, then publish it live. You can pause it any time from the automations list.</p>
+            </div>
+            <dl className="grid gap-3 rounded-[var(--radius-card)] border border-border bg-card p-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <dt className="text-xs text-muted-foreground">Account</dt>
+                <dd className="mt-0.5 font-medium">{account ? `@${account.igUsername}` : 'None'}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Posts</dt>
+                <dd className="mt-0.5 font-medium">{scopeType === 'ALL_POSTS' ? 'All posts and reels' : `${selectedMediaIds.length} selected`}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Triggers</dt>
+                <dd className="mt-0.5 font-medium">
+                  {triggers.map((t) => `${TRIGGER_SOURCES.find((o) => o.value === t.source)?.label ?? t.source}${t.keywords.trim() ? `: ${t.keywords.trim()}` : ''}`).join(', ')}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Steps</dt>
+                <dd className="mt-0.5 font-medium">{actionSteps.length}</dd>
+              </div>
+            </dl>
+            <AutomationFlowPreview
+              accountName={account ? `@${account.igUsername}` : ''}
+              displayName={account?.displayName}
+              profilePictureUrl={account?.profilePictureUrl}
+              source={triggers[0]?.source ?? 'COMMENT'}
+              keyword={triggers[0]?.keywords.split(',')[0]?.trim() ?? ''}
+              steps={actionSteps}
+            />
+          </section>
+        )}
+
+        {(!wizard || step === 'build') && (
         <div className="grid grid-cols-1 overflow-hidden rounded-[var(--radius-card)] border border-border xl:grid-cols-[minmax(0,1fr)_380px]">
           <section aria-label="Send message" className="min-w-0 bg-card xl:border-r xl:border-border">
             <div className="flex items-center justify-center border-b border-border bg-muted px-6 py-4">
@@ -609,53 +986,49 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
 
               <Separator />
 
-              <section aria-label="Message steps" className="flex flex-col gap-5">
-                <h3 className="text-sm font-semibold text-foreground">Message</h3>
-                {actionSteps.map((node, i) => (
-                  <div key={node.id} className="flex flex-col gap-4">
-                    {(actionSteps.length > 1 || node.type === 'CONDITION') && (
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          Step {i + 1}: {STEP_LABELS[node.type]}
-                        </p>
-                        {actionSteps.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setActionSteps((c) => removeActionStep(c, node.id))}
-                            className="flex items-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-danger"
-                          >
-                            <Trash size={14} />
-                            Delete step
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <ActionStepEditor
-                      nodes={[node]}
-                      bare
-                      depth={1}
-                      minItems={1}
-                      parentId={null}
-                      branch={null}
-                      storyReplyWarning={includesStoryReply}
-                      customFields={customFields}
-                      onUpdate={(id, patch) => setActionSteps((c) => updateActionStep(c, id, patch))}
-                      onRemove={(id) => setActionSteps((c) => removeActionStep(c, id))}
-                      onAdd={(parentId, branch, type) =>
-                        setActionSteps((c) => addActionStep(c, parentId, branch, emptyActionStep(type)))
-                      }
-                    />
-                    {i < actionSteps.length - 1 && <Separator />}
-                  </div>
-                ))}
+              <section aria-label="Message steps" className="flex flex-col gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Message</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Steps run top to bottom. Each step has its own text, buttons and attachment. Drag the handle or use the arrows to reorder.
+                  </p>
+                </div>
+                <Reorder.Group axis="y" values={actionSteps} onReorder={setActionSteps} className="flex flex-col gap-3">
+                  {actionSteps.map((node, i) => (
+                    <StepCard
+                      key={node.id}
+                      node={node}
+                      index={i}
+                      total={actionSteps.length}
+                      onMove={(direction) => moveTopLevelStep(node.id, direction)}
+                      onDelete={() => setActionSteps((c) => removeActionStep(c, node.id))}
+                    >
+                      <ActionStepEditor
+                        nodes={[node]}
+                        bare
+                        depth={1}
+                        minItems={1}
+                        parentId={null}
+                        branch={null}
+                        storyReplyWarning={includesStoryReply}
+                        customFields={customFields}
+                        onUpdate={(id, patch) => setActionSteps((c) => updateActionStep(c, id, patch))}
+                        onRemove={(id) => setActionSteps((c) => removeActionStep(c, id))}
+                        onAdd={(parentId, branch, type) =>
+                          setActionSteps((c) => addActionStep(c, parentId, branch, emptyActionStep(type)))
+                        }
+                      />
+                    </StepCard>
+                  ))}
+                </Reorder.Group>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => addTopLevelStep('SEND_DM')}
-                    className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+                    className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm font-medium text-foreground transition-colors hover:border-muted-foreground hover:bg-muted"
                   >
                     <Plus size={14} />
-                    Add another message
+                    Add step
                   </button>
                   <button
                     type="button"
@@ -668,20 +1041,24 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
                 </div>
               </section>
 
-              <Separator />
+              {!wizard && (
+                <>
+                  <Separator />
 
-              <section aria-label="Applies to">
-                <PostPicker
-                  accountId={accountId}
-                  scopeType={scopeType}
-                  onScopeTypeChange={(scope) => {
-                    setScopeType(scope);
-                    if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
-                  }}
-                  selectedMediaIds={selectedMediaIds}
-                  onToggleMedia={toggleMedia}
-                />
-              </section>
+                  <section aria-label="Applies to">
+                    <PostPicker
+                      accountId={accountId}
+                      scopeType={scopeType}
+                      onScopeTypeChange={(scope) => {
+                        setScopeType(scope);
+                        if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
+                      }}
+                      selectedMediaIds={selectedMediaIds}
+                      onToggleMedia={toggleMedia}
+                    />
+                  </section>
+                </>
+              )}
             </div>
           </section>
 
@@ -694,6 +1071,32 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             />
           </aside>
         </div>
+        )}
+
+        {wizard && (
+          <div className="flex items-center justify-between border-t border-border pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={step === 'posts'}
+              onClick={() => goTo(WIZARD_STEPS[Math.max(0, WIZARD_STEPS.findIndex((w) => w.key === step) - 1)].key)}
+            >
+              <ArrowLeft size={14} />
+              Back
+            </Button>
+            {step === 'publish' ? (
+              <Button key="publish" type="submit" disabled={submitting}>
+                {submitting ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} />}
+                Publish live
+              </Button>
+            ) : (
+              <Button key="next" type="button" onClick={goNext}>
+                {step === 'posts' ? 'Next: build the automation' : 'Next: preview and publish'}
+                <CaretRight size={14} />
+              </Button>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );

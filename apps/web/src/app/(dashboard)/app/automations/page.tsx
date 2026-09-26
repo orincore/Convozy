@@ -75,7 +75,11 @@ function AutomationRow({
           )}
         </div>
         <p className="mt-1 truncate text-xs text-muted-foreground">
-          {automation.triggers[0]?.source === 'COMMENT' ? 'Comment' : automation.triggers[0]?.source ?? 'No trigger'}
+          {automation.status === 'DRAFT'
+            ? 'Not published yet'
+            : automation.triggers[0]?.source === 'COMMENT'
+              ? 'Comment'
+              : automation.triggers[0]?.source ?? 'No trigger'}
           {keywords.length > 0 && <> · &ldquo;{keywords.join('", "')}&rdquo;</>}
           {automation.scopeType === 'SPECIFIC_POSTS' && ' · specific posts'}
         </p>
@@ -83,13 +87,22 @@ function AutomationRow({
 
       <div className="flex shrink-0 items-center justify-between gap-5 sm:justify-end">
         <ActionSummary automation={automation} />
-        <Switch
-          id={`toggle-${automation.id}`}
-          label={`${automation.status === 'ACTIVE' ? 'Pause' : 'Activate'} ${automation.name}`}
-          checked={automation.status === 'ACTIVE'}
-          onCheckedChange={(checked) => onToggle(automation.id, checked)}
-          disabled={busy}
-        />
+        {automation.status === 'DRAFT' ? (
+          <Link
+            href={`/app/automations/${automation.id}/edit`}
+            className="rounded-[var(--radius-control)] border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Continue editing
+          </Link>
+        ) : (
+          <Switch
+            id={`toggle-${automation.id}`}
+            label={`${automation.status === 'ACTIVE' ? 'Pause' : 'Activate'} ${automation.name}`}
+            checked={automation.status === 'ACTIVE'}
+            onCheckedChange={(checked) => onToggle(automation.id, checked)}
+            disabled={busy}
+          />
+        )}
         <div className="flex items-center gap-1">
           <Link
             href={`/app/automations/${automation.id}/edit`}
