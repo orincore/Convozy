@@ -87,6 +87,8 @@ const CONVERSATION_SOURCES: TriggerSource[] = [
   TriggerSource.REFERRAL,
 ];
 
+type ReplyButtonOut = { title: string; type: 'WEB_URL'; url: string } | { title: string; type: 'POSTBACK'; payload: string };
+
 // Instagram marks a glyph it can't represent in a profile name with a private-use
 // character (e.g. U+F8FF), which then shows up as a stray symbol when the name is
 // dropped into a message. Strip those and zero-width characters before sending.
@@ -427,6 +429,12 @@ export class AutomationsService {
           }
           if (!button.unlockedText && !button.unlockedMedia) {
             throw new AppException('INVALID_ACTION', `Button "${button.title}" needs a reply (text or media) for when it's tapped.`);
+          }
+          if (button.unlockedButtons?.some((b) => b.type === 'RETRY')) {
+            throw new AppException(
+              'INVALID_ACTION',
+              `Button "${button.title}"'s reply can't repeat the button: that option is only for the "not following yet" reply.`,
+            );
           }
           if (button.unlockedButtons?.length && !button.unlockedText) {
             throw new AppException(
@@ -797,10 +805,14 @@ export class AutomationsService {
   private async resolveReplyButtons(
     buttons: NonNullable<ActionButtonDto['unlockedButtons']>,
     instagramAccountId: string,
-  ): Promise<{ title: string; type: 'WEB_URL'; url: string }[]> {
+    postbackPayload: string,
+  ): Promise<ReplyButtonOut[]> {
     const needsProfile = buttons.some((b) => b.type === 'FOLLOW_PROFILE');
     const username = needsProfile ? await this.instagramService.getAccountUsername(instagramAccountId) : null;
-    return buttons.flatMap((b) => {
+    return buttons.flatMap<ReplyButtonOut>((b) => {
+      // The original button again: same payload, so tapping it resolves back to
+      // this exact button and re-checks whether they follow now.
+      if (b.type === 'RETRY') return [{ title: b.title, type: 'POSTBACK' as const, payload: postbackPayload }];
       if (b.type !== 'FOLLOW_PROFILE') return b.url ? [{ title: b.title, type: 'WEB_URL' as const, url: b.url }] : [];
       if (!username) return [];
       return [{ title: b.title, type: 'WEB_URL' as const, url: `https://www.instagram.com/${encodeURIComponent(username)}/` }];
@@ -912,7 +924,7 @@ export class AutomationsService {
         text,
         media,
         // Link buttons only ride on a text reply (validated at write time).
-        buttons: text && replyButtons?.length ? await this.resolveReplyButtons(replyButtons, data.instagramAccountId) : undefined,
+        buttons: text && replyButtons?.length ? await this.resolveReplyButtons(replyButtons, data.instagramAccountId, data.payload) : undefined,
       },
     };
     // Stable jobId keyed off the postback's own message id — a safe no-op

@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import {
   ArrowBendDownRight,
+  ArrowClockwise,
   CircleNotch,
   EyeSlash,
   File as FileIcon,
@@ -140,7 +141,7 @@ export interface LinkButtonNode {
   title: string;
   url: string;
   /** FOLLOW opens the connected account's own profile, so it needs no link. */
-  kind: 'LINK' | 'FOLLOW';
+  kind: 'LINK' | 'FOLLOW' | 'RETRY';
 }
 
 // A media attachment picked in the builder. Mutually exclusive with
@@ -247,10 +248,14 @@ export function addActionStep(
   });
 }
 
-function serializeLinkButtons(buttons: LinkButtonNode[]): { title: string; url?: string; type?: 'FOLLOW_PROFILE' }[] | undefined {
+function serializeLinkButtons(buttons: LinkButtonNode[]): { title: string; url?: string; type?: 'FOLLOW_PROFILE' | 'RETRY' }[] | undefined {
   return buttons.length
     ? buttons.map((b) =>
-        b.kind === 'FOLLOW' ? { title: b.title.trim(), type: 'FOLLOW_PROFILE' as const } : { title: b.title.trim(), url: b.url.trim() },
+        b.kind === 'FOLLOW'
+          ? { title: b.title.trim(), type: 'FOLLOW_PROFILE' as const }
+          : b.kind === 'RETRY'
+            ? { title: b.title.trim(), type: 'RETRY' as const }
+            : { title: b.title.trim(), url: b.url.trim() },
       )
     : undefined;
 }
@@ -322,8 +327,8 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
   });
 }
 
-function toLinkNode(l: { title: string; url?: string; type?: 'WEB_URL' | 'FOLLOW_PROFILE' }): LinkButtonNode {
-  return { id: makeId(), title: l.title, url: l.url ?? '', kind: l.type === 'FOLLOW_PROFILE' ? 'FOLLOW' : 'LINK' };
+function toLinkNode(l: { title: string; url?: string; type?: 'WEB_URL' | 'FOLLOW_PROFILE' | 'RETRY' }): LinkButtonNode {
+  return { id: makeId(), title: l.title, url: l.url ?? '', kind: l.type === 'FOLLOW_PROFILE' ? 'FOLLOW' : l.type === 'RETRY' ? 'RETRY' : 'LINK' };
 }
 
 // Only `type`/`url` are persisted server-side (ActionMediaDto) —
@@ -814,9 +819,12 @@ function ContentBlocks({ nodeId, hasMedia, hasButtons }: { nodeId: string; hasMe
 function ReplyLinkButtons({
   buttons,
   onChange,
+  retryTitle,
 }: {
   buttons: LinkButtonNode[];
   onChange: (next: LinkButtonNode[]) => void;
+  /** Set only for the "not following yet" reply: offers to show the original button again. */
+  retryTitle?: string;
 }) {
   function patch(id: string, change: Partial<LinkButtonNode>) {
     onChange(buttons.map((b) => (b.id === id ? { ...b, ...change } : b)));
@@ -828,13 +836,13 @@ function ReplyLinkButtons({
       {buttons.map((b) => (
         <div
           key={b.id}
-          className={`grid items-center gap-2 ${b.kind === 'FOLLOW' ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_1.4fr_auto]'}`}
+          className={`grid items-center gap-2 ${b.kind === 'LINK' ? 'grid-cols-[1fr_1.4fr_auto]' : 'grid-cols-[1fr_auto]'}`}
         >
           <Input
             value={b.title}
             onChange={(e) => patch(b.id, { title: e.target.value })}
             placeholder="Button label"
-            aria-label={b.kind === 'FOLLOW' ? 'Follow me button label' : 'Link button label'}
+            aria-label={b.kind === 'FOLLOW' ? 'Follow me button label' : b.kind === 'RETRY' ? 'Repeat button label' : 'Link button label'}
           />
           {b.kind === 'LINK' && (
             <Input
@@ -855,10 +863,15 @@ function ReplyLinkButtons({
           {b.kind === 'FOLLOW' && (
             <p className="col-span-2 -mt-1 text-xs text-muted-foreground">Opens your Instagram profile so they can follow you.</p>
           )}
+          {b.kind === 'RETRY' && (
+            <p className="col-span-2 -mt-1 text-xs text-muted-foreground">
+              Works like the original button: if they follow you by now they get the real reply, otherwise this message comes again.
+            </p>
+          )}
         </div>
       ))}
       {buttons.length < 3 && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className={`grid gap-2 ${retryTitle && !buttons.some((b) => b.kind === 'RETRY') ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <button type="button" onClick={() => onChange([...buttons, { id: makeId(), title: '', url: '', kind: 'LINK' }])} className={addClass}>
             <Plus size={14} />
             Add link button
@@ -871,6 +884,16 @@ function ReplyLinkButtons({
             <UserPlus size={14} />
             Follow me button
           </button>
+          {retryTitle && !buttons.some((b) => b.kind === 'RETRY') && (
+            <button
+              type="button"
+              onClick={() => onChange([...buttons, { id: makeId(), title: retryTitle, url: '', kind: 'RETRY' }])}
+              className={addClass}
+            >
+              <ArrowClockwise size={14} />
+              Show &ldquo;{retryTitle || 'button'}&rdquo; again
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1021,6 +1044,7 @@ function ButtonListEditor({
                       />
                       <ReplyLinkButtons
                         buttons={button.lockedButtons}
+                        retryTitle={button.title.trim() || 'Get link'}
                         onChange={(next) => updateButton(button.id, { lockedButtons: next })}
                       />
                     </>

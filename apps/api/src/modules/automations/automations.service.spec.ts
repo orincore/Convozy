@@ -996,6 +996,47 @@ describe('AutomationsService.resolvePostback', () => {
     );
   });
 
+  it('lets the locked reply re-show the original button, wired to the same payload', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the link',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: true,
+              unlockedText: 'Here you go',
+              lockedText: 'Follow me first',
+              lockedButtons: [
+                { title: 'Follow me', type: 'FOLLOW_PROFILE' },
+                { title: 'I followed, send it', type: 'RETRY' },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    instagramService.checkIsFollowing = jest.fn().mockResolvedValue(false);
+
+    await service.resolvePostback({ instagramAccountId: 'ig-account-1', senderId: 'ig-scoped-user-1', payload: 'action-1:0', mid: 'mid-8' });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: expect.objectContaining({
+          buttons: [
+            { title: 'Follow me', type: 'WEB_URL', url: 'https://www.instagram.com/creator_handle/' },
+            { title: 'I followed, send it', type: 'POSTBACK', payload: 'action-1:0' },
+          ],
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('sends the unlocked message when gated and the tapper is following', async () => {
     const { service, prisma, instagramService, messageSendQueue } = makeService();
     prisma.action.findUnique.mockResolvedValue(
@@ -1591,6 +1632,15 @@ describe('AutomationsService write-time validation — POSTBACK button replies',
         unlockedMedia: { type: 'image', url: 'https://cdn.example/a.png' },
         unlockedButtons: [{ title: 'Open', url: 'https://example.com' }],
       }),
+    );
+
+    await expect(service.create('workspace-1', input)).rejects.toThrow(AppException);
+  });
+
+  it('rejects the repeat-button option on the unlocked reply', async () => {
+    const { service } = makeService();
+    const input = baseCreateInput(
+      sendDmWithButton({ unlockedText: 'hi', unlockedButtons: [{ title: 'Again', type: 'RETRY' }] }),
     );
 
     await expect(service.create('workspace-1', input)).rejects.toThrow(AppException);

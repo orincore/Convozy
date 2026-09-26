@@ -62,7 +62,7 @@ function host(url: string): string {
 interface ReplyLike {
   text: string;
   media: MediaNode | null;
-  links: { title: string; kind: 'LINK' | 'FOLLOW' }[];
+  links: { title: string; kind: 'LINK' | 'FOLLOW' | 'RETRY' }[];
 }
 
 let replySeq = 0;
@@ -71,7 +71,7 @@ function replyMessage(r: ReplyLike): PreviewMessage {
     id: `reply-${++replySeq}`,
     text: renderSample(r.text).trim(),
     // A media reply cannot carry buttons (Meta sends them as different message types).
-    buttons: r.media ? [] : r.links.map((l) => l.title || (l.kind === 'FOLLOW' ? 'Follow me' : 'Link')),
+    buttons: r.media ? [] : r.links.map((l) => l.title || (l.kind === 'FOLLOW' ? 'Follow me' : l.kind === 'RETRY' ? 'Try again' : 'Link')),
     media: r.media ? { type: r.media.type, filename: r.media.filename } : null,
   };
 }
@@ -92,9 +92,12 @@ function tapBeats(node: ActionStepNode, messageId: string, accountName: string):
       out.push({ kind: 'tap', title, messageId, action: 'reply', detail: 'taps the button' });
       if (b.requireFollow) {
         out.push({ kind: 'note', text: 'They do not follow you yet' });
-        out.push({ kind: 'dm', delay: 0, reply: true, message: replyMessage({ text: b.lockedText, media: b.lockedMedia, links: b.lockedButtons }) });
-        out.push({ kind: 'note', text: 'They follow you, then tap the button again' });
-        out.push({ kind: 'tap', title, messageId, action: 'reply', detail: 'taps the button again' });
+        const locked = replyMessage({ text: b.lockedText, media: b.lockedMedia, links: b.lockedButtons });
+        out.push({ kind: 'dm', delay: 0, reply: true, message: locked });
+        // A repeat button on the locked reply means they tap that one, right where they are.
+        const retry = b.lockedMedia ? undefined : b.lockedButtons.find((l) => l.kind === 'RETRY');
+        out.push({ kind: 'note', text: retry ? 'They follow you, then tap the button in this message' : 'They follow you, then tap the original button again' });
+        out.push({ kind: 'tap', title: retry ? retry.title || 'Try again' : title, messageId: retry ? locked.id : messageId, action: 'reply', detail: 'taps the button again' });
       }
       out.push({ kind: 'dm', delay: 0, reply: true, message: replyMessage({ text: b.unlockedText, media: b.unlockedMedia, links: b.unlockedButtons }) });
     }

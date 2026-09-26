@@ -44,11 +44,13 @@ export class ReplyLinkButtonDto {
 
   // FOLLOW_PROFILE links to the connected account's own profile, resolved when
   // the reply is sent (same as a FOLLOW_PROFILE button on a message).
+  // RETRY (locked reply only) re-shows the original button: tapping it repeats
+  // the tap, so the follow check runs again without scrolling back up.
   @IsOptional()
-  @IsIn(['WEB_URL', 'FOLLOW_PROFILE'])
-  type?: 'WEB_URL' | 'FOLLOW_PROFILE';
+  @IsIn(['WEB_URL', 'FOLLOW_PROFILE', 'RETRY'])
+  type?: 'WEB_URL' | 'FOLLOW_PROFILE' | 'RETRY';
 
-  @ValidateIf((o: ReplyLinkButtonDto) => o.type !== 'FOLLOW_PROFILE')
+  @ValidateIf((o: ReplyLinkButtonDto) => o.type !== 'FOLLOW_PROFILE' && o.type !== 'RETRY')
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
   url?: string;
 }

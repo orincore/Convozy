@@ -208,7 +208,8 @@ export interface ReplyLinkButtonInput {
   title: string;
   // Omitted for FOLLOW_PROFILE (the server links to the account's own profile).
   url?: string;
-  type?: 'WEB_URL' | 'FOLLOW_PROFILE';
+  // RETRY re-shows the original button in the "not following yet" reply.
+  type?: 'WEB_URL' | 'FOLLOW_PROFILE' | 'RETRY';
 }
 
 // Mirrors TriggerInput's matchType options (including the AI_INTENT stub) —
