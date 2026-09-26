@@ -365,10 +365,11 @@ interface AutomationFormProps {
 
 export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   const router = useRouter();
-  // Editing a published automation keeps the single-page editor; creating one
-  // (or resuming a draft) goes through the three-step wizard.
+  // Creating, resuming a draft and editing a published automation all use the
+  // same three steps. Only creating/resuming saves drafts; an edit changes the
+  // live automation directly (isEdit).
   const isEdit = automation !== undefined && automation.status !== 'DRAFT';
-  const wizard = !isEdit;
+  const wizard = true;
   const restored = useMemo(() => (automation?.status === 'DRAFT' ? readDraft(automation) : null), [automation]);
 
   const [accountId, setAccountId] = useState(automation?.instagramAccountId ?? accounts[0]?.id ?? '');
@@ -462,7 +463,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     selectedMediaIds.length > 0 ||
     triggers.some((t) => t.keywords.trim() !== '') ||
     actionSteps.some((n) => n.text.trim() !== '' || n.buttons.length > 0 || n.media !== null || n.then.length > 0 || n.else.length > 0);
-  const dirty = wizard && hasContent && contentSnapshot !== savedSnapshot;
+  const dirty = !isEdit && hasContent && contentSnapshot !== savedSnapshot;
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -518,10 +519,10 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     };
   });
   useEffect(() => {
-    if (!wizard || !autosave) return;
+    if (isEdit || !autosave) return;
     const id = setInterval(() => autosaveRef.current(), AUTOSAVE_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [wizard, autosave]);
+  }, [isEdit, autosave]);
 
   // Re-render the "saved 2 min ago" label as time passes.
   const [, setTick] = useState(0);
@@ -581,12 +582,16 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (i < WIZARD_STEPS.length - 1) goTo(WIZARD_STEPS[i + 1].key);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (wizard && step !== 'publish') {
+    if (step !== 'publish') {
       goNext();
       return;
     }
+    void submitAutomation();
+  }
+
+  async function submitAutomation() {
     setError(null);
 
     if (!accountId) {
@@ -710,7 +715,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             {!isEdit && <Badge>Draft</Badge>}
           </nav>
           <div className="flex flex-wrap items-center gap-2">
-            {wizard && (
+            {!isEdit && (
               <div className="mr-1 flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <Switch
@@ -745,15 +750,15 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             <Button type="button" variant="outline" asChild>
               <Link href="/app/automations">Cancel</Link>
             </Button>
-            {wizard ? (
+            {isEdit ? (
+              <Button type="button" onClick={() => void submitAutomation()} disabled={submitting}>
+                {submitting && <CircleNotch size={16} className="animate-spin" />}
+                Save changes
+              </Button>
+            ) : (
               <Button type="button" variant="outline" onClick={() => void saveDraft()} disabled={savingDraft || !hasContent}>
                 {savingDraft ? <CircleNotch size={16} className="animate-spin" /> : <FloppyDisk size={16} />}
                 Save draft
-              </Button>
-            ) : (
-              <Button type="submit" disabled={submitting}>
-                {submitting && <CircleNotch size={16} className="animate-spin" />}
-                Save changes
               </Button>
             )}
           </div>
@@ -809,7 +814,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
                     >
                       {done ? <CheckCircle size={14} weight="fill" /> : i + 1}
                     </span>
-                    <span className="min-w-0 truncate">{w.label}</span>
+                    <span className="min-w-0 truncate">{isEdit && w.key === 'publish' ? 'Preview and save' : w.label}</span>
                   </button>
                 </li>
               );
@@ -841,8 +846,12 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
         {wizard && step === 'publish' && (
           <section aria-label="Preview and publish" className="flex flex-col gap-6 py-2">
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">Preview and publish</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Watch how it will run, then publish it live. You can pause it any time from the automations list.</p>
+              <h2 className="text-lg font-semibold tracking-tight">{isEdit ? 'Preview and save' : 'Preview and publish'}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {isEdit
+                  ? 'Watch how it will run with your changes, then save them. The automation stays live.'
+                  : 'Watch how it will run, then publish it live. You can pause it any time from the automations list.'}
+              </p>
             </div>
             <dl className="grid gap-3 rounded-[var(--radius-card)] border border-border bg-card p-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
               <div>
@@ -1087,11 +1096,11 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
             {step === 'publish' ? (
               <Button key="publish" type="submit" disabled={submitting}>
                 {submitting ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneTilt size={16} />}
-                Publish live
+                {isEdit ? 'Save changes' : 'Publish live'}
               </Button>
             ) : (
               <Button key="next" type="button" onClick={goNext}>
-                {step === 'posts' ? 'Next: build the automation' : 'Next: preview and publish'}
+                {step === 'posts' ? 'Next: build the automation' : isEdit ? 'Next: preview and save' : 'Next: preview and publish'}
                 <CaretRight size={14} />
               </Button>
             )}
