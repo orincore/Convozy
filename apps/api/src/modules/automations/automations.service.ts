@@ -87,6 +87,13 @@ const CONVERSATION_SOURCES: TriggerSource[] = [
   TriggerSource.REFERRAL,
 ];
 
+// Instagram marks a glyph it can't represent in a profile name with a private-use
+// character (e.g. U+F8FF), which then shows up as a stray symbol when the name is
+// dropped into a message. Strip those and zero-width characters before sending.
+function cleanProfileText(value: string): string {
+  return value.replace(/[\uE000-\uF8FF\u200B-\u200D\uFEFF]/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 // Cap on a saved draft's builder state (a few long messages with buttons is far below this).
 const MAX_DRAFT_BYTES = 256 * 1024;
 
@@ -830,8 +837,8 @@ export class AutomationsService {
     }
 
     return template.replace(AutomationsService.MERGE_TAG_PATTERN, (full, tag: string) => {
-      if (tag === 'username') return username ?? '';
-      if (tag === 'full_name') return fullName ?? '';
+      if (tag === 'username') return cleanProfileText(username ?? '');
+      if (tag === 'full_name') return cleanProfileText(fullName ?? '');
       if (tag.startsWith('field.')) return fieldValues?.[tag.slice('field.'.length)] ?? '';
       return full;
     });

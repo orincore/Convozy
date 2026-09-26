@@ -1857,3 +1857,19 @@ describe('AutomationsService drafts', () => {
     );
   });
 });
+
+
+describe('AutomationsService merge tag text cleanup', () => {
+  it('strips the private-use placeholder Instagram puts in some profile names', async () => {
+    const { service, instagramService } = makeService();
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: 'Adarsh Suradkar\uf8ff', username: 'adarsh' });
+
+    const rendered = await (service as any).renderMergeTags('Heyy {{full_name}} replied in dm', {
+      workspaceId: 'workspace-1',
+      instagramAccountId: 'ig-account-1',
+      igScopedId: 'sender-1',
+    });
+
+    expect(rendered).toBe('Heyy Adarsh Suradkar replied in dm');
+  });
+});
