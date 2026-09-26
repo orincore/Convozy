@@ -407,6 +407,89 @@ partnership claimed) via AskUserQuestion.
   mention of "Graph API" (`/privacy`, `/terms`, `/data-deletion`) reworded to
   plain "Meta" without losing meaning. `grep -rn "Graph API" src` returns
   nothing outside the code comment documenting the decision.
+- ✅ **Dashboard visual pass, part 1: shell + Accounts** (2026-09-26, user
+  asked to bring the marketing site's polish into the logged-in app; scoped
+  to shell + one page first per `ui.md`'s "incremental, not all pages" rule,
+  confirmed via AskUserQuestion). `shell.tsx`: sidebar nav item highlight is
+  now a shared `layoutId` pill that glides between routes on navigation
+  (adapted from Spectrum's Nav List Card, spring hover-slide kept, lucide
+  swapped for Phosphor); standalone Accounts link sits in a double-bezel
+  outer shell matching the marketing cards; header is sticky + blurred;
+  mobile drawer slides in with a spring instead of appearing instantly.
+  Accounts page (`app/page.tsx`): account rows are wrapped in the same
+  double-bezel card, connection status is a new reusable `StatusPill`
+  (`components/dashboard/status-pill.tsx`, adapted from Spectrum's Status
+  Badge, colors remapped onto the locked monochrome tokens: success/danger
+  are the only real color per CLAUDE.md §12a), rows stagger in on load, and
+  the loading state is a layout-matching skeleton (`AccountRowSkeleton`,
+  adapted from Spectrum's Skeleton Reveal pulse technique) instead of a
+  centered spinner. Fixed a mobile overflow bug the redesign introduced
+  (status pill + two icon buttons no longer fit the row's fixed-width right
+  side below `sm:`; row now stacks vertically on mobile). Verified with
+  `tsc --noEmit` (clean) and headless Playwright screenshots (desktop +
+  mobile, populated/empty states, mobile nav drawer) against the running
+  dev server with a mocked `/api/instagram/accounts` response — zero console
+  errors. Remaining dashboard pages (Automations, Contacts, Segments, Tags,
+  Custom Fields, Activity, Login) are unstarted; same treatment should roll
+  out page by page, not all at once.
+- ✅ **Dashboard visual pass, part 1b: premium follow-up** (2026-09-26). User
+  called part 1 "too plain / not premium" (AskUserQuestion). Replaced the
+  hand-rolled bezel divs with the real shared `Bezel` component
+  (`components/marketing/bezel.tsx`) instead of a weaker reimplementation;
+  each account is now its own `SpotlightCard`-wrapped card (cursor-tracked
+  border glow on hover, adapted from Spectrum's Bento Card, already used on
+  the marketing site) instead of a flat divided list. Added a shared
+  `DashboardBackdrop` (`components/dashboard/backdrop.tsx`) — the marketing
+  grid + glow-orb atmosphere, rendered once at the shell root, deliberately
+  static (no scroll-parallax, no cursor tracking, no dust) since this is a
+  product surface people stare at all day, not a landing page. Bigger,
+  gradient-accented page headings (`.text-gradient`, matches marketing
+  headline treatment). Sidebar logo now has a hover glow; the standalone
+  Accounts nav link and empty-state icon both sit in the same nested-shell
+  language. Extended `CtaButton` (`components/marketing/cta-button.tsx`) to
+  optionally render as a real `<button>` with `onClick`/`disabled` (was
+  `Link`-only) so the empty-state CTA could use the marketing site's actual
+  pill-with-nested-arrow button instead of the generic `Button` component,
+  without touching any of its existing `href` call sites.
+  Caught and fixed one regression before shipping: `InkReveal` (marketing's
+  infinite looping letter-reveal) combined with `.text-gradient` made the
+  empty-state headline unreadable for most of its cycle and looped forever
+  next to a real "Connect" CTA with no motivation (taste-skill 5, "motion
+  must be motivated") — replaced with a one-shot fade+blur-in on mount.
+  Verified with `tsc --noEmit`, `eslint` (both clean) and headless
+  Playwright screenshots (desktop populated/empty/hover states, mobile) —
+  zero console errors.
+- ✅ **Dashboard visual pass, part 2: Automations** (2026-09-26, user asked
+  for this page directly). Same language as the Accounts pass: each
+  automation is a `SpotlightCard` + `Bezel` card instead of a flat divided
+  list, page heading uses `.text-gradient`, empty state has the glow-orb
+  icon + one-shot fade-in + real `CtaButton`, loading state is a new
+  `AutomationRowSkeleton` (`components/dashboard/skeleton.tsx`) matching the
+  settled layout instead of a spinner. Extended the shared `StatusPill` map
+  (`components/dashboard/status-pill.tsx`) with `PAUSED` and `DRAFT` tones
+  (both neutral, per CLAUDE.md §12a) and used it for the existing Draft
+  badge instead of the old plain `<span>`. Action-type icon row now
+  overlaps like an avatar stack (`-space-x-1.5`, ring-2 ring-card) instead
+  of a flat row of circles. Toggle switch, edit/delete icon buttons and all
+  existing automation logic (toggle/delete/list load, error/retry state)
+  left untouched. Verified with `tsc --noEmit`, `eslint` (clean) and headless
+  Playwright screenshots (desktop populated/mobile/empty) with a mocked
+  `/api/automations` response — zero console errors. Automation editor
+  (`/app/automations/new`, `/app/automations/[id]/edit`) not touched yet.
+- ✅ **`Switch` rebuilt, too large / not premium** (2026-09-26, user
+  feedback on part 2). The old toggle (adapted from a uiverse.io snippet,
+  CLAUDE.md §12b) was a 92x44px track with a bordered red/green dot -
+  oversized next to 32px icon buttons in the same row and visually loud.
+  Replaced with Spectrum UI's Animated Switch (spectrumhq.in/docs/animated-
+  switch: press-to-stretch knob, drag-to-toggle with flick-to-commit),
+  ported from framer-motion to motion/react. Its neutral-900/white track
+  already matched our monochrome tokens, so the on-state track color is the
+  only real-color exception (bg-success/90, semantic state per CLAUDE.md
+  §12a) - sized down to 30x17px (`sm`) to sit naturally among the row's
+  other 32px controls. Deleted the now-unused `switch.module.css`. Verified
+  the new size/position with a Playwright bounding-box assertion (30x17px)
+  and a toggle click with zero console errors; `tsc --noEmit` and `eslint`
+  clean.
 
 ## Phase 1 — Instagram connection & webhook pipeline
 
@@ -1513,6 +1596,78 @@ container (decrypted the real account token via the existing
 not started, full detail in the plan file (needs a light update to reflect
 the Milestone 4/6 rescoping — Follow-to-DM stays dropped, no Meta webhook/
 endpoint exists for it). Building **one at a time**.
+
+### Phase 5.3 - Support CRM: tickets + team (user directive, 2026-09-28)
+
+Status: built and unit-tested (api 269 tests), **not deployed, not verified
+against real Meta traffic** (so not marked done, per CLAUDE.md 10/14). Needs
+migrations `20260928010000_story_mention_referral_triggers` and
+`20260928020000_tickets_crm_and_team_invites` applied, and connected accounts
+re-subscribed (`messaging_referral` added to `WEBHOOK_SUBSCRIBED_FIELDS`).
+
+- 🟡 **New triggers** (also usable in automations): `DM`, `STORY_MENTION`,
+  `REFERRAL` (ig.me link / ad click, keyword = the `?ref=` value). A DM
+  automation answers a given sender at most once per 24h.
+- 🟡 **Tickets** (`apps/api/src/modules/tickets`): created from comments that
+  @mention the account or match complaint keywords, DMs (keyword, or from
+  someone already on a ticket), story mentions, ig.me referrals, and tagged
+  posts (polled every 30 min via `GET /<ig-user-id>/tags`, read-only).
+  Grouping: one ticket per post (`dedupKey = media:<id>`), many participants,
+  a per-person thread; a new complaint on a resolved/closed ticket reopens it.
+  Statuses OPEN / IN_PROGRESS / WAITING / RESOLVED / CLOSED, priority,
+  assignee, internal notes, activity log, first-response time.
+- 🟡 **Agent replies** go through `MessagingService.sendManual` (synchronous,
+  never auto-retried). Enforces Meta rules: DM only within 24h of their last
+  message; one private reply per comment within 7 days; public reply under
+  their latest comment. Failed sends stay visible on the ticket with Meta's
+  error.
+- 🟡 **Team** (`modules/team`): members, roles OWNER/ADMIN/MEMBER(agent),
+  invites (hashed one-time link, 7-day expiry, email-bound). No mail service
+  exists, so the inviter copies the link; the invitee joins by signing in with
+  Google using the invited email (login is Google-only).
+- 🟡 UI: `/app/tickets`, `/app/tickets/[id]`, `/app/settings/tickets`,
+  `/app/settings/team`, public `/app/invite/[token]`.
+
+**Verified limits (tested live 2026-09-28 with an Instagram-Login token, not assumed):**
+- @mentions of the brand in comments/captions on OTHER accounts' posts are
+  not readable with our login: `mentioned_comment` and `mentioned_media` do
+  not exist on graph.instagram.com, and Meta only allows a public reply (no
+  DM) for them. Supporting this needs Instagram API with **Facebook Login**
+  (linked Facebook Page) plus permissions `instagram_basic`,
+  `instagram_manage_comments`, `pages_read_engagement`, `pages_show_list`
+  (+ `ads_management` or `ads_read` if the Page role comes via Business
+  Manager), the `mentions` webhook field, Advanced Access and App Review.
+  Not built.
+- Tagged posts (`/me/tags`) return the poster's username but no IG-scoped ID:
+  those tickets cannot be replied to from Convozy.
+- Not built: mail delivery for invites, "Human Agent" (7-day reply window,
+  requested in the Meta app but not yet approved), SLA timers, canned replies,
+  round-robin assignment, rate limiting on `GET /auth/invites/:token`.
+
+### Phase 5.4 - Multi-account workspaces (user directive, 2026-09-28)
+
+Status: built and unit-tested (api 285 tests), applied to the local database,
+**not deployed and not applied to production**. Migration
+`20260928030000_per_account_crm_scope` must be applied right before deploying
+this code (old code creates tags/fields with no account, which the new code
+would not show).
+
+- 🟡 Every account keeps a fully separate CRM: automations, activity, contacts,
+  segments, tags, custom fields, tickets and ticket rules are scoped to the
+  selected Instagram account. Tags/custom fields/segments/ticket settings gained
+  `instagramAccountId` (existing rows backfilled to the workspace's first
+  account). Team and billing stay workspace-level.
+- 🟡 Scoping is enforced server-side: the dashboard sends
+  `X-Instagram-Account-Id`; `AccountScopeGuard` verifies it belongs to the
+  caller's workspace (from the JWT) before any scoped controller runs.
+- 🟡 Sidebar: an account switcher (profile picture, name, @username) replaces
+  the "Accounts" link, with Add account / Manage accounts. Switching remounts
+  the page so every list reloads for that account.
+- 🟡 Connecting: opens Instagram login in a popup with `force_reauth=true`
+  (Business Login docs: forces credential login even if the browser is already
+  logged in), so another account can be chosen. A web page cannot open a
+  private/incognito window, so `force_reauth` is the mechanism; if the popup is
+  blocked it falls back to a full-page redirect.
 
 ## Phase 6 — AI features
 

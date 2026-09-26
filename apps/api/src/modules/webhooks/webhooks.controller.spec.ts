@@ -59,6 +59,21 @@ function makeRequest(payload: MetaWebhookPayload) {
   return { rawBody: Buffer.from(JSON.stringify(payload)), body: payload } as any;
 }
 
+function messagingPayload(event: Record<string, unknown>): MetaWebhookPayload {
+  return {
+    object: 'instagram',
+    entry: [
+      {
+        id: 'ig-business-1',
+        time: 1700000000,
+        messaging: [
+          { sender: { id: 'ig-scoped-user-1' }, recipient: { id: 'ig-business-1' }, timestamp: 1700000000, ...event },
+        ],
+      },
+    ],
+  } as MetaWebhookPayload;
+}
+
 describe('WebhooksController.receive — story replies', () => {
   it('enqueues a STORY_REPLY event for a message with reply_to.story', async () => {
     const { controller, webhooksService } = makeController();
@@ -97,54 +112,80 @@ describe('WebhooksController.receive — story replies', () => {
     );
   });
 
-  it('does not enqueue a plain DM (no reply_to.story) — DM automations are not implemented yet', async () => {
+  it('enqueues a plain DM (no reply_to.story) as a DM event', async () => {
     const { controller, webhooksService } = makeController();
-    const payload: MetaWebhookPayload = {
-      object: 'instagram',
-      entry: [
-        {
-          id: 'ig-business-1',
-          time: 1700000000,
-          messaging: [
-            {
-              sender: { id: 'ig-scoped-user-1' },
-              recipient: { id: 'ig-business-1' },
-              timestamp: 1700000000,
-              message: { mid: 'msg-2', text: 'hey there' },
-            },
-          ],
-        },
-      ],
-    };
+    await controller.receive(makeRequest(messagingPayload({ message: { mid: 'msg-2', text: 'hey there' } })), 'sha256=x');
 
-    await controller.receive(makeRequest(payload), 'sha256=whatever');
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledTimes(1);
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalEventId: 'msg-2',
+        source: 'DM',
+        text: 'hey there',
+        fromUsername: 'ig-scoped-user-1',
+        fromIgScopedId: 'ig-scoped-user-1',
+      }),
+    );
+  });
+
+  it('treats a reply-to-message (reply_to.mid) as an ordinary DM', async () => {
+    const { controller, webhooksService } = makeController();
+    await controller.receive(makeRequest(messagingPayload({ message: { mid: 'msg-3', text: 'ok', reply_to: {} } })), 'sha256=x');
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(expect.objectContaining({ source: 'DM', externalEventId: 'msg-3' }));
+  });
+
+  it('ignores echo, self, deleted and unsupported messages', async () => {
+    const { controller, webhooksService } = makeController();
+    for (const flag of ['is_echo', 'is_self', 'is_deleted', 'is_unsupported']) {
+      await controller.receive(makeRequest(messagingPayload({ message: { mid: `m-${flag}`, text: 'x', [flag]: true } })), 'sha256=x');
+    }
 
     expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
   });
+});
 
-  it('does not enqueue a reply-to-message (reply_to.mid, not reply_to.story)', async () => {
+describe('WebhooksController.receive — story mentions and referrals', () => {
+  it('enqueues a STORY_MENTION for a message with a story_mention attachment', async () => {
     const { controller, webhooksService } = makeController();
-    const payload: MetaWebhookPayload = {
-      object: 'instagram',
-      entry: [
-        {
-          id: 'ig-business-1',
-          time: 1700000000,
-          messaging: [
-            {
-              sender: { id: 'ig-scoped-user-1' },
-              recipient: { id: 'ig-business-1' },
-              timestamp: 1700000000,
-              message: { mid: 'msg-3', text: 'ok', reply_to: {} },
-            },
-          ],
-        },
-      ],
-    };
+    await controller.receive(
+      makeRequest(
+        messagingPayload({ message: { mid: 'msg-4', attachments: [{ type: 'story_mention', payload: { url: 'https://cdn/x' } }] } }),
+      ),
+      'sha256=x',
+    );
 
-    await controller.receive(makeRequest(payload), 'sha256=whatever');
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledTimes(1);
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: 'msg-4', source: 'STORY_MENTION', text: '' }),
+    );
+  });
 
-    expect(webhooksService.enqueueIfNew).not.toHaveBeenCalled();
+  it('enqueues a REFERRAL (text = ref) for a messaging_referral event with no message', async () => {
+    const { controller, webhooksService } = makeController();
+    await controller.receive(
+      makeRequest(messagingPayload({ referral: { ref: 'summer-sale', source: 'SHORTLINK', type: 'OPEN_THREAD' } })),
+      'sha256=x',
+    );
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledTimes(1);
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'REFERRAL', text: 'summer-sale', externalEventId: 'referral:ig-scoped-user-1:1700000000' }),
+    );
+  });
+
+  it('emits both a REFERRAL and a DM event for a first message that carries a referral', async () => {
+    const { controller, webhooksService } = makeController();
+    await controller.receive(
+      makeRequest(messagingPayload({ message: { mid: 'msg-5', text: 'hi', referral: { ref: 'summer-sale' } } })),
+      'sha256=x',
+    );
+
+    const sources = webhooksService.enqueueIfNew.mock.calls.map((c: any[]) => [c[0].source, c[0].externalEventId]);
+    expect(sources).toEqual([
+      ['REFERRAL', 'msg-5:referral'],
+      ['DM', 'msg-5'],
+    ]);
   });
 });
 

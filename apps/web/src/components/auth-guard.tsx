@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { getAccessToken } from '@/lib/auth';
 
 const PUBLIC_PATHS = ['/app/login'];
+const isPublic = (pathname: string) => PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/app/invite/');
 
 /** Redirects to /app/login when there's no stored access token. Dev-stage — see lib/auth.ts. */
 export function AuthGuard({ children }: { children: ReactNode }) {
@@ -18,7 +19,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   // this dev-stage guard (TODO Phase 4: replace with real session state).
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (PUBLIC_PATHS.includes(pathname)) {
+    if (isPublic(pathname)) {
       setChecked(true);
       return;
     }

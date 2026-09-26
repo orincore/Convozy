@@ -155,3 +155,68 @@ describe('AuthService.login', () => {
     );
   });
 });
+
+describe('AuthService invites', () => {
+  const validInvite = {
+    id: 'inv-1',
+    email: 'new@x.com',
+    role: 'MEMBER',
+    workspaceId: 'workspace-9',
+    acceptedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    workspace: { name: 'Acme' },
+  };
+  const googleProfile = { googleId: 'g-1', email: 'New@X.com', name: 'Sam' };
+
+  function setup(invite: unknown) {
+    const ctx = makeService();
+    const tx = {
+      workspaceInvite: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      user: { create: jest.fn().mockResolvedValue({ id: 'user-9', email: 'New@X.com', role: 'MEMBER', workspaceId: 'workspace-9' }) },
+    };
+    ctx.prisma.workspaceInvite = { findUnique: jest.fn().mockResolvedValue(invite), findFirst: jest.fn().mockResolvedValue(invite) };
+    ctx.prisma.user.findUnique = jest.fn().mockResolvedValue(null);
+    ctx.prisma.workspace = { create: jest.fn().mockResolvedValue({ id: 'ws-new' }) };
+    ctx.prisma.user.create = jest.fn().mockResolvedValue({ id: 'user-new', email: 'New@X.com', role: 'OWNER', workspaceId: 'ws-new' });
+    ctx.prisma.$transaction = jest.fn().mockImplementation((fn: any) => fn(tx));
+    return { ...ctx, tx };
+  }
+
+  it('previews a valid invite with the workspace name', async () => {
+    const { service } = setup(validInvite);
+    await expect(service.previewInvite('t'.repeat(30))).resolves.toEqual({ email: 'new@x.com', role: 'MEMBER', workspaceName: 'Acme' });
+  });
+
+  it.each([
+    ['unknown', null],
+    ['already used', { ...validInvite, acceptedAt: new Date() }],
+    ['expired', { ...validInvite, expiresAt: new Date(Date.now() - 1000) }],
+  ])('gives the same generic error for a %s invite', async (_label, invite) => {
+    const { service } = setup(invite);
+    await expect(service.previewInvite('t'.repeat(30))).rejects.toThrow(/invalid or has expired/);
+  });
+
+  it('a Google sign-in with an invited email joins the inviting workspace with the invited role', async () => {
+    const { service, tx, prisma } = setup(validInvite);
+
+    await service.loginOrRegisterWithGoogle(googleProfile);
+
+    expect(prisma.workspaceInvite.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ email: 'new@x.com', acceptedAt: null }) }),
+    );
+    expect(tx.workspaceInvite.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'inv-1', acceptedAt: null } }));
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ role: 'MEMBER', workspaceId: 'workspace-9', googleId: 'g-1' }) }),
+    );
+    expect(prisma.workspace.create).not.toHaveBeenCalled();
+  });
+
+  it('without an invite, a new Google user still gets their own workspace as owner', async () => {
+    const { service, prisma } = setup(null);
+
+    await service.loginOrRegisterWithGoogle(googleProfile);
+
+    expect(prisma.workspace.create).toHaveBeenCalled();
+    expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ role: 'OWNER' }) }));
+  });
+});

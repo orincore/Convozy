@@ -155,6 +155,15 @@ describe('ContactsService tags', () => {
     expect(prisma.contactTag.upsert).not.toHaveBeenCalled();
   });
 
+  it('404s adding a tag from a different Instagram account to a contact', async () => {
+    const { service, prisma } = makeService();
+    prisma.contact.findUnique.mockResolvedValue({ id: 'contact-1', workspaceId: 'workspace-1', instagramAccountId: 'acc-1' });
+    prisma.tag.findUnique.mockResolvedValue({ id: 'tag-1', workspaceId: 'workspace-1', instagramAccountId: 'acc-2' });
+
+    await expect(service.addTagToContact('workspace-1', 'contact-1', 'tag-1')).rejects.toThrow(NotFoundAppException);
+    expect(prisma.contactTag.upsert).not.toHaveBeenCalled();
+  });
+
   it('404s adding a tag to a contact that belongs to a different workspace', async () => {
     const { service, prisma } = makeService();
     prisma.contact.findUnique.mockResolvedValue({ id: 'contact-1', workspaceId: 'someone-elses-workspace' });
@@ -172,6 +181,15 @@ describe('ContactsService tags', () => {
 });
 
 describe('ContactsService custom fields', () => {
+  it('404s setting a custom field that belongs to a different Instagram account', async () => {
+    const { service, prisma } = makeService();
+    prisma.contact.findUnique.mockResolvedValue({ id: 'contact-1', workspaceId: 'workspace-1', instagramAccountId: 'acc-1' });
+    prisma.customField.findUnique.mockResolvedValue({ id: 'field-1', workspaceId: 'workspace-1', instagramAccountId: 'acc-2', type: CustomFieldType.TEXT });
+
+    await expect(service.setFieldValue('workspace-1', 'contact-1', 'field-1', 'x')).rejects.toThrow(NotFoundAppException);
+    expect(prisma.contactFieldValue.upsert).not.toHaveBeenCalled();
+  });
+
   it('accepts a valid NUMBER value', async () => {
     const { service, prisma } = makeService();
     prisma.contact.findUnique.mockResolvedValue({ id: 'contact-1', workspaceId: 'workspace-1' });
@@ -226,20 +244,30 @@ describe('ContactsService custom fields', () => {
 });
 
 describe('ContactsService contacts listing', () => {
-  it('scopes every list to the caller workspace', async () => {
+  it('scopes every list to the caller workspace and the selected account', async () => {
     const { service, prisma } = makeService();
 
-    await service.listContacts('workspace-1', {});
+    await service.listContacts('workspace-1', 'acc-1', {});
 
     expect(prisma.contact.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ workspaceId: 'workspace-1' }) }),
+      expect.objectContaining({ where: expect.objectContaining({ workspaceId: 'workspace-1', instagramAccountId: 'acc-1' }) }),
+    );
+  });
+
+  it('ignores a client-supplied account filter that differs from the selected account', async () => {
+    const { service, prisma } = makeService();
+
+    await service.listContacts('workspace-1', 'acc-1', { instagramAccountId: 'acc-other' });
+
+    expect(prisma.contact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ instagramAccountId: 'acc-1' }) }),
     );
   });
 
   it('filters by tagId when provided', async () => {
     const { service, prisma } = makeService();
 
-    await service.listContacts('workspace-1', { tagId: 'tag-1' });
+    await service.listContacts('workspace-1', 'acc-1', { tagId: 'tag-1' });
 
     expect(prisma.contact.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -260,7 +288,7 @@ describe('ContactsService segments — rule validation', () => {
   it('rejects a rule node with none of all/any/tag/field', async () => {
     const { service } = makeService();
 
-    await expect(service.createSegment('workspace-1', { name: 'x', rules: {} as any })).rejects.toThrow(
+    await expect(service.createSegment('workspace-1', 'acc-1', { name: 'x', rules: {} as any })).rejects.toThrow(
       AppException,
     );
   });
@@ -269,7 +297,7 @@ describe('ContactsService segments — rule validation', () => {
     const { service } = makeService();
 
     await expect(
-      service.createSegment('workspace-1', { name: 'x', rules: { tag: 'vip', field: { key: 'a', op: SegmentRuleOp.EQ, value: '1' } } as any }),
+      service.createSegment('workspace-1', 'acc-1', { name: 'x', rules: { tag: 'vip', field: { key: 'a', op: SegmentRuleOp.EQ, value: '1' } } as any }),
     ).rejects.toThrow(AppException);
   });
 
@@ -280,7 +308,7 @@ describe('ContactsService segments — rule validation', () => {
       rule = { all: [rule] };
     }
 
-    await expect(service.createSegment('workspace-1', { name: 'x', rules: rule })).rejects.toThrow(AppException);
+    await expect(service.createSegment('workspace-1', 'acc-1', { name: 'x', rules: rule })).rejects.toThrow(AppException);
   });
 
   it('accepts a valid nested all/any tree and persists the raw rules JSON', async () => {
@@ -288,7 +316,7 @@ describe('ContactsService segments — rule validation', () => {
     prisma.segment.create.mockResolvedValue({ id: 'segment-1' });
     const rules = { all: [{ tag: 'vip' }, { any: [{ field: { key: 'city', op: SegmentRuleOp.EQ, value: 'NYC' } }] }] };
 
-    await service.createSegment('workspace-1', { name: 'VIPs in NYC', rules });
+    await service.createSegment('workspace-1', 'acc-1', { name: 'VIPs in NYC', rules });
 
     expect(prisma.segment.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ workspaceId: 'workspace-1', rules }) }),
@@ -397,7 +425,7 @@ describe('ContactsService segments — rule evaluation (buildSegmentWhere)', () 
     const { service, prisma } = makeService();
     prisma.segment.findUnique.mockResolvedValue({ id: 'segment-1', workspaceId: 'workspace-1', rules: { tag: 'vip' } });
 
-    await service.listContacts('workspace-1', { segmentId: 'segment-1' });
+    await service.listContacts('workspace-1', 'acc-1', { segmentId: 'segment-1' });
 
     expect(prisma.contact.findMany).toHaveBeenCalledWith(
       expect.objectContaining({

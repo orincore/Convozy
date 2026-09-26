@@ -42,7 +42,20 @@ export interface MetaMessagingEvent {
     // Instagram messaging inherits, since Meta's own Instagram-specific
     // webhook docs didn't spell this out directly.
     reply_to?: { story?: { id: string; url: string } };
+    // A story mention arrives as a message with a `story_mention` attachment
+    // (Meta Story Mention doc: messages webhook, attachments[].type).
+    attachments?: { type: string; payload?: { url?: string } }[];
+    // First message that came in through an ig.me link or a click-to-message
+    // ad carries the referral inline.
+    referral?: MetaReferral;
+    is_echo?: boolean;
+    is_self?: boolean;
+    is_deleted?: boolean;
+    is_unsupported?: boolean;
   };
+  // messaging_referral webhook: an existing conversation was re-opened via
+  // an ig.me link / ad (a brand-new thread sends `message.referral` instead).
+  referral?: MetaReferral;
   // Present when the sender tapped a postback-type button on a Button
   // Template message (see messaging.service.ts's sendButtonTemplate) —
   // requires the app be subscribed to the messaging_postbacks webhook field
@@ -53,4 +66,11 @@ export interface MetaMessagingEvent {
     title: string;
     payload: string;
   };
+}
+
+export interface MetaReferral {
+  ref?: string; // the ?ref= value set on the ig.me link
+  source?: string;
+  type?: string;
+  ad_id?: string;
 }

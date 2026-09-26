@@ -10,7 +10,7 @@ const NO_CHROME_PATHS = ['/app/login'];
 export function DashboardChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  if (NO_CHROME_PATHS.includes(pathname)) {
+  if (NO_CHROME_PATHS.includes(pathname) || pathname.startsWith('/app/invite/') || pathname === '/app/instagram/callback') {
     return <>{children}</>;
   }
 

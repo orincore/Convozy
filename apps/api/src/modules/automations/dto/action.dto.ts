@@ -8,6 +8,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   Min,
   MinLength,
   ValidateIf,
@@ -34,6 +35,17 @@ export class ActionMediaDto {
   url!: string;
 }
 
+// A link button attached to a POSTBACK button's reply (the message sent after
+// the tap), so the reply can carry e.g. the actual link.
+export class ReplyLinkButtonDto {
+  @IsString()
+  @MinLength(1)
+  title!: string;
+
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+  url!: string;
+}
+
 // A button on a DM (Meta's Button Template — messaging-api/button-template).
 // WEB_URL opens a link, unchanged from before. POSTBACK is new: tapping it
 // fires a messaging_postbacks webhook Convozy resolves back to this exact
@@ -44,13 +56,16 @@ export class ActionMediaDto {
 // client — the server always assigns it as `${actionId}:${buttonIndex}` once
 // the action row exists, so a postback can never be forged to resolve to
 // another workspace's action.
+// FOLLOW_PROFILE is a web_url button whose link is the connected account's
+// own profile, resolved at send time (AutomationsService.resolveButtons) so
+// the client never supplies (or can spoof) the destination.
 export class ActionButtonDto {
   @IsString()
   @MinLength(1)
   title!: string;
 
-  @IsIn(['WEB_URL', 'POSTBACK'])
-  type!: 'WEB_URL' | 'POSTBACK';
+  @IsIn(['WEB_URL', 'POSTBACK', 'FOLLOW_PROFILE'])
+  type!: 'WEB_URL' | 'POSTBACK' | 'FOLLOW_PROFILE';
 
   @ValidateIf((o: ActionButtonDto) => o.type === 'WEB_URL')
   @IsString()
@@ -90,6 +105,23 @@ export class ActionButtonDto {
   @ValidateNested()
   @Type(() => ActionMediaDto)
   lockedMedia?: ActionMediaDto;
+
+  // Link buttons attached to the unlocked / locked reply. Only valid with
+  // reply text (Meta's Button Template needs text; media can't carry buttons)
+  // — enforced in AutomationsService.validateActionTree.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ReplyLinkButtonDto)
+  unlockedButtons?: ReplyLinkButtonDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ReplyLinkButtonDto)
+  lockedButtons?: ReplyLinkButtonDto[];
 }
 
 export class ActionPayloadDto {

@@ -317,8 +317,13 @@ Convozy's theme is **locked dark, monochrome black and white** — no color
 brand accent. This is a deliberate, fixed decision, not a default to swap
 later without asking:
 
-- **Dark only.** No light mode, no `prefers-color-scheme` switching. Every
-  surface (marketing site and dashboard) renders dark.
+- **Dark by default; dashboard has an opt-in light mode** (user directive,
+  2026-09-26). The marketing site is dark only. The dashboard shell has a
+  Sun/Moon toggle that sets `data-theme="light"` on `<html>` (persisted in
+  `localStorage`, removed on leaving `/app`); light values live in
+  `globals.css` under `:root[data-theme='light']`. No `prefers-color-scheme`
+  switching. Use tokens (e.g. `bg-foreground/10`), never hardcoded white/black,
+  so both themes work.
 - **Monochrome.** No hue-based accent color (no blue/purple/coral/etc.).
   Primary actions use an **inverted white-on-black treatment** (white
   background, black text/icon) instead of a brand color for emphasis.
@@ -388,14 +393,18 @@ without being reminded:
 1. **Load the design skills**: `taste-skill:taste-skill` plus the high-end
    direction (`taste-skill:soft-skill`; the user calls it "high-end visual
    design"). Follow their rules and their pre-flight checklist.
-2. **Use the Spectrum UI MCP (`spectrum-ui`) for animated assets**: search it
-   (`search_components`, `get_component`) and pull the best-suited animated
-   components/patterns for the section being built. Install into a scratch
-   directory and adapt the source rather than adding its dependencies
-   (framer-motion, lucide-react) to the repo: port to `motion/react`, Phosphor
-   icons and our tokens. Say which Spectrum asset each section is based on.
+2. **Use the shadcn MCP (`shadcn`) for components and assets** (user directive,
+   2026-09-26, replaces Spectrum UI): search and view items
+   (`search_items_in_registries`, `view_items_in_registries`,
+   `get_item_examples_from_registries`) and pull the best-suited components/blocks
+   for the section being built. `apps/web/components.json` is configured; add items
+   with `npx shadcn@latest add <item>` (pnpm must be on PATH). After adding, adapt
+   the generated file: import `cn` from `@/lib/cn` (not the `cn` npm package), swap
+   shadcn color classes (`primary`, `input`, `destructive`) for our tokens, and
+   replace `lucide-react` icons with Phosphor. Say which shadcn item each section is
+   based on.
 3. Never present UI work as done without having done both. If the MCP has no
-   suitable asset for a section, say so explicitly instead of silently skipping.
+   suitable item for a section, say so explicitly instead of silently skipping.
 
 Notes: the user runs Claude through the `c2` alias (`CLAUDE_CONFIG_DIR=
 ~/.claude-client2`); MCP servers must be registered in that config (see the

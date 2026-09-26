@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, getRefreshToken, storeTokens } from './auth';
+import { ACCOUNT_HEADER, getSelectedAccountId } from './account';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api';
 
@@ -55,11 +56,13 @@ async function refreshAccessToken(): Promise<string | null> {
  */
 async function authFetch<T>(path: string, init?: RequestInit, isRetry = false): Promise<T> {
   const token = getAccessToken();
+  const accountId = getSelectedAccountId();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
       Authorization: `Bearer ${token}`,
+      ...(accountId ? { [ACCOUNT_HEADER]: accountId } : {}),
       ...init?.headers,
     },
   });
@@ -161,7 +164,7 @@ export const mediaApi = {
 
 // ── Automations ────────────────────────────────────────────────────────────
 
-export type TriggerSource = 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT';
+export type TriggerSource = 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT' | 'STORY_MENTION' | 'REFERRAL';
 export type TriggerMatchType = 'EXACT' | 'CONTAINS' | 'REGEX' | 'AI_INTENT';
 export type ActionType = 'SEND_DM' | 'REPLY_COMMENT' | 'SEND_AI_REPLY' | 'CONDITION' | 'HIDE_COMMENT';
 export type AutomationStatus = 'ACTIVE' | 'PAUSED' | 'DRAFT';
@@ -176,10 +179,11 @@ export interface TriggerInput {
   caseSensitive?: boolean;
 }
 
-export type ActionButtonKind = 'WEB_URL' | 'POSTBACK';
+export type ActionButtonKind = 'WEB_URL' | 'POSTBACK' | 'FOLLOW_PROFILE';
 
 // A button on a SEND_DM message (Meta's Button Template — up to 3 per
-// message). WEB_URL opens a link. POSTBACK fires a tap-to-unlock response:
+// message). FOLLOW_PROFILE opens the connected account's own profile (the
+// server resolves the link at send time). WEB_URL opens a link. POSTBACK fires a tap-to-unlock response:
 // `unlockedText`/`unlockedMedia` (exactly one of the two) is sent back
 // immediately, unless `requireFollow` is set, in which case Convozy checks
 // live whether the tapper follows the account and sends the locked pair
@@ -195,6 +199,14 @@ export interface ActionButtonInput {
   unlockedMedia?: ActionMediaInput;
   lockedText?: string;
   lockedMedia?: ActionMediaInput;
+  // Link buttons attached to the reply text (not valid on a media reply).
+  unlockedButtons?: ReplyLinkButtonInput[];
+  lockedButtons?: ReplyLinkButtonInput[];
+}
+
+export interface ReplyLinkButtonInput {
+  title: string;
+  url: string;
 }
 
 // Mirrors TriggerInput's matchType options (including the AI_INTENT stub) —
@@ -457,3 +469,184 @@ export const segmentsApi = {
     authFetch<{ contacts: Contact[]; total: number }>(`/segments/${id}/members${page ? `?page=${page}` : ''}`),
   count: (id: string) => authFetch<{ count: number }>(`/segments/${id}/count`),
 };
+
+// ── Tickets (support CRM) ─────────────────────────────────────────────────
+
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'WAITING' | 'RESOLVED' | 'CLOSED';
+export type TicketPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+export type TicketSource = 'COMMENT' | 'DM' | 'STORY_MENTION' | 'REFERRAL' | 'TAGGED_POST';
+
+export interface TicketAssignee {
+  id: string;
+  name: string | null;
+  email: string;
+}
+
+export interface TicketListItem {
+  id: string;
+  number: number;
+  subject: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  source: TicketSource;
+  mediaPermalink: string | null;
+  lastActivityAt: string;
+  createdAt: string;
+  assignee: TicketAssignee | null;
+  participantCount: number;
+  participants: { username: string | null }[];
+  lastMessage: { text: string; kind: 'INBOUND' | 'OUTBOUND' | 'NOTE' } | null;
+}
+
+export interface TicketList {
+  total: number;
+  page: number;
+  limit: number;
+  items: TicketListItem[];
+}
+
+export interface TicketCounts {
+  status: Partial<Record<TicketStatus, number>>;
+  active: number;
+  unassigned: number;
+  mine: number;
+}
+
+export interface TicketReplyOptions {
+  canPublicReply: boolean;
+  dmMode: 'DM' | 'PRIVATE_REPLY' | null;
+  dmUnavailableReason: string | null;
+}
+
+export interface TicketParticipant {
+  id: string;
+  igScopedId: string | null;
+  username: string | null;
+  contactId: string | null;
+  lastInboundAt: string | null;
+  latestCommentId: string | null;
+  replyOptions: TicketReplyOptions;
+}
+
+export interface TicketMessage {
+  id: string;
+  participantId: string | null;
+  kind: 'INBOUND' | 'OUTBOUND' | 'NOTE';
+  channel: 'COMMENT' | 'DM' | 'PUBLIC_REPLY' | 'NOTE' | 'TAGGED_POST';
+  text: string;
+  status: 'SENT' | 'FAILED';
+  error: string | null;
+  createdAt: string;
+  author: { id: string; name: string | null } | null;
+}
+
+export interface TicketEvent {
+  id: string;
+  type: string;
+  data: Record<string, unknown> | null;
+  createdAt: string;
+  actor: { id: string; name: string | null } | null;
+}
+
+export interface TicketDetail {
+  id: string;
+  number: number;
+  subject: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  source: TicketSource;
+  mediaId: string | null;
+  mediaPermalink: string | null;
+  createdAt: string;
+  lastActivityAt: string;
+  firstResponseAt: string | null;
+  resolvedAt: string | null;
+  assignee: TicketAssignee | null;
+  instagramAccount: { id: string; igUsername: string };
+  participants: TicketParticipant[];
+  messages: TicketMessage[];
+  events: TicketEvent[];
+}
+
+export interface TicketSettings {
+  enabled: boolean;
+  keywords: string[];
+  createFromMentions: boolean;
+  createFromAllDms: boolean;
+  createFromStoryMentions: boolean;
+  createFromReferrals: boolean;
+  createFromTaggedPosts: boolean;
+}
+
+export interface ListTicketsParams {
+  view?: 'active' | 'closed' | 'all';
+  status?: TicketStatus;
+  priority?: TicketPriority;
+  source?: TicketSource;
+  assignee?: string;
+  search?: string;
+  page?: number;
+}
+
+export const ticketsApi = {
+  list: (params: ListTicketsParams = {}) => {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') qs.set(key, String(value));
+    }
+    const query = qs.toString();
+    return authFetch<TicketList>(`/tickets${query ? `?${query}` : ''}`);
+  },
+  counts: () => authFetch<TicketCounts>('/tickets/counts'),
+  get: (id: string) => authFetch<TicketDetail>(`/tickets/${id}`),
+  update: (id: string, input: { status?: TicketStatus; priority?: TicketPriority; assigneeId?: string | null; subject?: string }) =>
+    authFetch<TicketDetail>(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  reply: (id: string, input: { participantId: string; channel: 'DM' | 'PUBLIC_REPLY'; text: string }) =>
+    authFetch<TicketMessage>(`/tickets/${id}/replies`, { method: 'POST', body: JSON.stringify(input) }),
+  addNote: (id: string, text: string) =>
+    authFetch<TicketMessage>(`/tickets/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) }),
+  getSettings: () => authFetch<TicketSettings>('/tickets/settings'),
+  updateSettings: (input: Partial<TicketSettings>) =>
+    authFetch<TicketSettings>('/tickets/settings', { method: 'PUT', body: JSON.stringify(input) }),
+};
+
+// ── Team ──────────────────────────────────────────────────────────────────
+
+export type TeamRole = 'OWNER' | 'ADMIN' | 'MEMBER';
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  name: string | null;
+  role: TeamRole;
+  createdAt: string;
+}
+
+export interface TeamInvite {
+  id: string;
+  email: string;
+  role: TeamRole;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export const teamApi = {
+  members: () => authFetch<TeamMember[]>('/team/members'),
+  invites: () => authFetch<TeamInvite[]>('/team/invites'),
+  invite: (input: { email: string; role: 'ADMIN' | 'MEMBER' }) =>
+    authFetch<{ invite: TeamInvite; token: string }>('/team/invites', { method: 'POST', body: JSON.stringify(input) }),
+  revokeInvite: (id: string) => authFetch<void>(`/team/invites/${id}`, { method: 'DELETE' }),
+  updateRole: (id: string, role: 'ADMIN' | 'MEMBER') =>
+    authFetch<TeamMember>(`/team/members/${id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  remove: (id: string) => authFetch<void>(`/team/members/${id}`, { method: 'DELETE' }),
+};
+
+/** Public: what an invite link is for (no login needed). */
+export async function previewInvite(token: string): Promise<{ email: string; role: TeamRole; workspaceName: string }> {
+  const res = await fetch(`${API_BASE_URL}/auth/invites/${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(body?.message ?? 'This invite link is invalid or has expired.', res.status);
+  }
+  return res.json();
+}

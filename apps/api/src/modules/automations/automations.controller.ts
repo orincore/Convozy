@@ -1,16 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { AccountId } from '../../common/decorators/account-id.decorator';
+import { AccountScopeGuard } from '../../common/guards/account-scope.guard';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { AutomationsService } from './automations.service';
 import { CreateAutomationDto } from './dto/create-automation.dto';
 import { UpdateAutomationDto } from './dto/update-automation.dto';
 
 @Controller('automations')
+@UseGuards(AccountScopeGuard)
 export class AutomationsController {
   constructor(private readonly automationsService: AutomationsService) {}
 
   @Get()
-  list(@CurrentUser() user: RequestUser) {
-    return this.automationsService.list(user.workspaceId);
+  list(@CurrentUser() user: RequestUser, @AccountId() accountId: string) {
+    return this.automationsService.list(user.workspaceId, accountId);
   }
 
   @Get(':id')

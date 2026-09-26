@@ -44,6 +44,7 @@ import { QueueName } from './constants';
       { name: QueueName.BILLING_EVENTS },
       { name: QueueName.TOKEN_REFRESH },
       { name: QueueName.POSTBACK_EVENTS },
+      { name: QueueName.TICKETS_SYNC },
     ),
   ],
   exports: [BullModule],

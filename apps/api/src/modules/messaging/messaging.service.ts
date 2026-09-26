@@ -125,6 +125,50 @@ export class MessagingService {
     }
   }
 
+  /**
+   * Synchronous, single-attempt send for a human agent typing in the CRM.
+   * Same guards and MessageLog as `send`, but never retried and never queued:
+   * the agent needs to see immediately whether Instagram accepted the message
+   * (24h window closed, comment too old, etc.) rather than have it silently
+   * re-sent later.
+   */
+  async sendManual(
+    data: MessageSendJobData,
+  ): Promise<{ status: 'SENT'; externalId: string | null } | { status: 'FAILED'; error: string }> {
+    if (await this.circuitBreaker.isOpen(data.instagramAccountId)) {
+      await this.recordLog(data, 1, MessageLogStatus.RATE_LIMITED, null, 'CIRCUIT_OPEN');
+      return { status: 'FAILED', error: 'Sending to this Instagram account is paused after repeated errors. Try again shortly.' };
+    }
+    const rateLimit = await this.rateLimiter.tryConsume(data.instagramAccountId);
+    if (!rateLimit.allowed) {
+      await this.recordLog(data, 1, MessageLogStatus.RATE_LIMITED, null, 'RATE_LIMIT_EXCEEDED');
+      return { status: 'FAILED', error: `Rate limit reached. Try again in ${rateLimit.retryAfterSeconds}s.` };
+    }
+    const credentials = await this.instagramService.getSendCredentials(data.instagramAccountId);
+    if (!credentials) {
+      await this.recordLog(data, 1, MessageLogStatus.FAILED, null, 'INSTAGRAM_ACCOUNT_UNAVAILABLE');
+      return { status: 'FAILED', error: 'This Instagram account is disconnected. Reconnect it to send messages.' };
+    }
+
+    try {
+      const response = (await this.callGraphApi(data, credentials)) as { message_id?: string; id?: string } | null;
+      await this.recordLog(data, 1, MessageLogStatus.SENT, response, null);
+      await this.circuitBreaker.recordSuccess(data.instagramAccountId);
+      return { status: 'SENT', externalId: response?.message_id ?? response?.id ?? null };
+    } catch (err) {
+      await this.circuitBreaker.recordFailure(data.instagramAccountId);
+      const graphError = err instanceof GraphApiError ? err : null;
+      await this.recordLog(
+        data,
+        1,
+        graphError?.status === 429 ? MessageLogStatus.RATE_LIMITED : MessageLogStatus.FAILED,
+        graphError?.body ?? null,
+        graphError?.message ?? (err as Error).message,
+      );
+      return { status: 'FAILED', error: graphError?.message ?? (err as Error).message };
+    }
+  }
+
   private async callGraphApi(
     data: MessageSendJobData,
     credentials: { accessToken: string; igBusinessId: string },

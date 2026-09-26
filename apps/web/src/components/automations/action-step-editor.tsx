@@ -10,7 +10,10 @@ import {
   FileVideo,
   Image as ImageIcon,
   LockSimple,
+  Clock,
   Paperclip,
+  TextAlignLeft,
+  UserPlus,
   Plus,
   Trash,
   WarningCircle,
@@ -21,6 +24,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/cn';
+import { MergeTagEditor, insertTagIntoEditor, type TagLabel } from '@/components/automations/merge-tag-editor';
 import {
   ApiError,
   mediaApi,
@@ -67,27 +72,9 @@ function buildMergeFieldOptions(customFields: CustomField[]): MergeFieldOption[]
   return [...BUILTIN_MERGE_FIELDS, ...customFields.map((f) => ({ tag: `field.${f.key}`, label: f.label }))];
 }
 
-// Inserts {{tag}} at the caret position of the textarea identified by
-// `elementId` (looked up by DOM id rather than a React ref, since every
-// call site here renders inside an array .map() where hooks can't be
-// called) and updates the field's controlled value through `onChange`.
-// Falls back to appending at the end if the element can't be found (e.g.
-// autofill/SSR edge cases).
-function insertMergeTag(elementId: string, value: string, onChange: (next: string) => void, tag: string): void {
-  const token = `{{${tag}}}`;
-  const el = typeof document !== 'undefined' ? (document.getElementById(elementId) as HTMLTextAreaElement | null) : null;
-  if (!el) {
-    onChange(value + token);
-    return;
-  }
-  const start = el.selectionStart ?? value.length;
-  const end = el.selectionEnd ?? value.length;
-  onChange(value.slice(0, start) + token + value.slice(end));
-  requestAnimationFrame(() => {
-    el.focus();
-    const pos = start + token.length;
-    el.setSelectionRange(pos, pos);
-  });
+// Chip labels: the readable name of a tag, e.g. "username" or a custom field's label.
+function makeLabelFor(options: MergeFieldOption[]): TagLabel {
+  return (tag) => options.find((o) => o.tag === tag)?.label.toLowerCase() ?? tag.replace(/^field\./, '').replace(/_/g, ' ');
 }
 
 function MergeTagBar({ options, onInsert }: { options: MergeFieldOption[]; onInsert: (tag: string) => void }) {
@@ -143,6 +130,15 @@ export interface ButtonNode {
   unlockedMedia: MediaNode | null;
   lockedText: string;
   lockedMedia: MediaNode | null;
+  unlockedButtons: LinkButtonNode[];
+  lockedButtons: LinkButtonNode[];
+}
+
+// A link button on a tap-reply (the message sent after a POSTBACK tap).
+export interface LinkButtonNode {
+  id: string;
+  title: string;
+  url: string;
 }
 
 // A media attachment picked in the builder. Mutually exclusive with
@@ -192,6 +188,8 @@ export function emptyButton(): ButtonNode {
     unlockedMedia: null,
     lockedText: '',
     lockedMedia: null,
+    unlockedButtons: [],
+    lockedButtons: [],
   };
 }
 
@@ -247,6 +245,10 @@ export function addActionStep(
   });
 }
 
+function serializeLinkButtons(buttons: LinkButtonNode[]): { title: string; url: string }[] | undefined {
+  return buttons.length ? buttons.map((b) => ({ title: b.title.trim(), url: b.url.trim() })) : undefined;
+}
+
 /** Recursively serializes the editor's local tree into the API's ActionInput shape. */
 export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
   return nodes.map((n, index) => {
@@ -300,8 +302,12 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
                       lockedText: b.requireFollow && !b.lockedMedia ? b.lockedText.trim() : undefined,
                       lockedMedia:
                         b.requireFollow && b.lockedMedia ? { type: b.lockedMedia.type, url: b.lockedMedia.url } : undefined,
+                      unlockedButtons: serializeLinkButtons(b.unlockedMedia ? [] : b.unlockedButtons),
+                      lockedButtons: b.requireFollow && !b.lockedMedia ? serializeLinkButtons(b.lockedButtons) : undefined,
                     }
-                  : { title: b.title.trim(), type: b.type, url: b.url.trim() },
+                  : b.type === 'FOLLOW_PROFILE'
+                    ? { title: b.title.trim(), type: b.type }
+                    : { title: b.title.trim(), type: b.type, url: b.url.trim() },
               )
             : undefined,
         media: n.media ? { type: n.media.type, url: n.media.url } : undefined,
@@ -357,6 +363,8 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         unlockedMedia: toMediaNode(b.unlockedMedia),
         lockedText: b.lockedText ?? '',
         lockedMedia: toMediaNode(b.lockedMedia),
+        unlockedButtons: (b.unlockedButtons ?? []).map((l) => ({ id: makeId(), title: l.title, url: l.url })),
+        lockedButtons: (b.lockedButtons ?? []).map((l) => ({ id: makeId(), title: l.title, url: l.url })),
       })),
       media: toMediaNode(action.payload?.media),
       conditionField: 'COMMENT_TEXT',
@@ -422,6 +430,8 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
           if (!hasUnlocked) {
             return `"${button.title}" needs a reply (text or media) to send when tapped.`;
           }
+          const linkError = validateLinkButtons(button.title, 'reply', button.unlockedButtons);
+          if (linkError) return linkError;
           if (button.requireFollow) {
             const hasLocked = button.lockedText.trim() || button.lockedMedia;
             if (button.lockedText.trim() && button.lockedMedia) {
@@ -430,9 +440,21 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
             if (!hasLocked) {
               return `"${button.title}" requires a follow, so it also needs a reply for people who aren't following yet.`;
             }
+            const lockedLinkError = validateLinkButtons(button.title, 'locked reply', button.lockedButtons);
+            if (lockedLinkError) return lockedLinkError;
           }
         }
       }
+    }
+  }
+  return null;
+}
+
+function validateLinkButtons(buttonTitle: string, where: string, links: LinkButtonNode[]): string | null {
+  for (const link of links) {
+    if (!link.title.trim()) return `Every link button on "${buttonTitle}"'s ${where} needs a label.`;
+    if (!/^https?:\/\/\S+$/i.test(link.url.trim())) {
+      return `"${link.title || 'A link button'}" on "${buttonTitle}"'s ${where} needs a full link starting with https://`;
     }
   }
   return null;
@@ -445,6 +467,8 @@ interface ActionStepEditorProps {
   parentId: string | null;
   branch: 'then' | 'else' | null;
   storyReplyWarning: boolean;
+  /** Renders top-level steps without their own card, for the builder's center pane. */
+  bare?: boolean;
   // Workspace custom fields (contacts module), offered as {{field.<key>}}
   // merge tags alongside the built-in {{username}}/{{full_name}} — fetched
   // once by the page that mounts this editor, not by this component, so
@@ -470,6 +494,7 @@ export function ActionStepEditor({
   parentId,
   branch,
   storyReplyWarning,
+  bare = false,
   customFields,
   onUpdate,
   onRemove,
@@ -477,11 +502,18 @@ export function ActionStepEditor({
 }: ActionStepEditorProps) {
   const canAddCondition = depth < MAX_ACTION_TREE_DEPTH;
   const mergeFieldOptions = buildMergeFieldOptions(customFields);
+  const labelFor = makeLabelFor(mergeFieldOptions);
 
   return (
     <div className="flex flex-col gap-3">
       {nodes.map((node) => (
-        <div key={node.id} className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-card p-4">
+        <div
+          key={node.id}
+          className={cn(
+            'flex flex-col gap-4',
+            bare ? '' : 'gap-3 rounded-[var(--radius-card)] border border-border bg-card p-4',
+          )}
+        >
           <div className="flex items-start justify-between gap-3">
             <div className="grid flex-1 grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
@@ -668,18 +700,18 @@ export function ActionStepEditor({
                   </Label>
                   <MergeTagBar
                     options={mergeFieldOptions}
-                    onInsert={(tag) => insertMergeTag(`step-text-${node.id}`, node.text, (v) => onUpdate(node.id, { text: v }), tag)}
+                    onInsert={(tag) => insertTagIntoEditor(`step-text-${node.id}`, tag, labelFor)}
                   />
-                  <textarea
+                  <MergeTagEditor
                     id={`step-text-${node.id}`}
                     value={node.text}
-                    onChange={(e) => onUpdate(node.id, { text: e.target.value })}
-                    rows={3}
-                    placeholder="Hey {{username}}, here's the link!"
-                    className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                    onChange={(v) => onUpdate(node.id, { text: v })}
+                    labelFor={labelFor}
+                    placeholder="Enter your text..."
+                    className="min-h-32 bg-muted"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Tap a tag above to insert it, or type it directly.
+                    Tap a tag above to insert it.
                     {storyReplyWarning &&
                       ' For story replies {{username}} will show a numeric ID, not a handle — Instagram’s webhook doesn’t include one for those.'}
                   </p>
@@ -693,6 +725,7 @@ export function ActionStepEditor({
                   )}
                   {node.buttons.length === 0 && (
                     <MediaAttachmentEditor
+                      inputId={`step-media-${node.id}`}
                       media={node.media}
                       onAttach={(media) => onUpdate(node.id, { media, text: '' })}
                       onRemove={() => onUpdate(node.id, { media: null })}
@@ -700,10 +733,120 @@ export function ActionStepEditor({
                   )}
                 </>
               )}
+              {node.type === 'SEND_DM' && bare && (
+                <ContentBlocks nodeId={node.id} hasMedia={node.media !== null} hasButtons={node.buttons.length > 0} />
+              )}
             </>
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+const CONTENT_BLOCKS: { key: 'text' | 'image' | 'pdf' | 'audio' | 'delay'; title: string; hint: string; Icon: typeof ImageIcon }[] = [
+  { key: 'text', title: 'Text', hint: 'Add simple text and buttons', Icon: TextAlignLeft },
+  { key: 'image', title: 'Image or video', hint: 'Boost engagement with visuals', Icon: ImageIcon },
+  { key: 'pdf', title: 'PDF', hint: 'Add a PDF file to your message', Icon: FileIcon },
+  { key: 'audio', title: 'Audio', hint: 'Add a voice or audio clip', Icon: FileAudio },
+  { key: 'delay', title: 'Delay', hint: 'Wait a few seconds before sending', Icon: Clock },
+];
+
+// Shortcuts into the step's own fields (looked up by DOM id, same approach as
+// insertMergeTag): each block scrolls to and focuses/opens the control that
+// already exists, so there is one source of truth for the step's data.
+function ContentBlocks({ nodeId, hasMedia, hasButtons }: { nodeId: string; hasMedia: boolean; hasButtons: boolean }) {
+  function run(key: 'text' | 'image' | 'pdf' | 'audio' | 'delay') {
+    const id =
+      key === 'text' ? `step-text-${nodeId}` : key === 'delay' ? `step-delay-${nodeId}` : `step-media-${nodeId}`;
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (key === 'image' || key === 'pdf' || key === 'audio') {
+      const input = el as HTMLInputElement;
+      // Narrow the picker to the chosen kind; the default accept list is restored below.
+      const original = input.accept;
+      input.accept =
+        key === 'pdf'
+          ? 'application/pdf'
+          : key === 'audio'
+            ? 'audio/aac,audio/mp4,audio/x-m4a,audio/wav,audio/x-wav,audio/mpeg'
+            : 'image/png,image/jpeg,image/gif,video/mp4,video/ogg,video/webm,video/quicktime,video/x-msvideo';
+      input.click();
+      setTimeout(() => {
+        input.accept = original;
+      }, 0);
+    } else el.focus();
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5 border-t border-border pt-4">
+      <p className="text-xs text-muted-foreground">Add one of the content blocks:</p>
+      {CONTENT_BLOCKS.filter((b) => !(hasMedia && b.key === 'text') && !(hasButtons && (b.key === 'image' || b.key === 'pdf' || b.key === 'audio'))).map(({ key, title, hint, Icon }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => run(key)}
+          className="flex items-center gap-4 rounded-[var(--radius-card)] border border-dashed border-border px-4 py-3 text-left transition-colors hover:border-muted-foreground hover:bg-muted"
+        >
+          <Icon size={26} weight="light" className="shrink-0 text-muted-foreground" />
+          <span>
+            <span className="block text-sm font-medium text-foreground">{title}</span>
+            <span className="block text-xs text-muted-foreground">{hint}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Link buttons under a tap-reply's text, e.g. the button that opens the
+// actual link once someone taps "Get link".
+function ReplyLinkButtons({
+  buttons,
+  onChange,
+}: {
+  buttons: LinkButtonNode[];
+  onChange: (next: LinkButtonNode[]) => void;
+}) {
+  function patch(id: string, change: Partial<LinkButtonNode>) {
+    onChange(buttons.map((b) => (b.id === id ? { ...b, ...change } : b)));
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {buttons.map((b) => (
+        <div key={b.id} className="grid grid-cols-[1fr_1.4fr_auto] items-center gap-2">
+          <Input
+            value={b.title}
+            onChange={(e) => patch(b.id, { title: e.target.value })}
+            placeholder="Button label"
+            aria-label="Link button label"
+          />
+          <Input
+            value={b.url}
+            onChange={(e) => patch(b.id, { url: e.target.value })}
+            placeholder="https://example.com"
+            aria-label="Link button URL"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(buttons.filter((x) => x.id !== b.id))}
+            className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
+            aria-label="Remove link button"
+          >
+            <Trash size={14} />
+          </button>
+        </div>
+      ))}
+      {buttons.length < 3 && (
+        <button
+          type="button"
+          onClick={() => onChange([...buttons, { id: makeId(), title: '', url: '' }])}
+          className="flex w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-2.5 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+        >
+          <Plus size={14} />
+          Add link button to this reply
+        </button>
+      )}
     </div>
   );
 }
@@ -717,6 +860,7 @@ function ButtonListEditor({
   mergeFieldOptions: MergeFieldOption[];
   onUpdate: (patch: Partial<ActionStepNode>) => void;
 }) {
+  const labelFor = makeLabelFor(mergeFieldOptions);
   function updateButton(buttonId: string, patch: Partial<ButtonNode>) {
     onUpdate({ buttons: node.buttons.map((b) => (b.id === buttonId ? { ...b, ...patch } : b)) });
   }
@@ -726,21 +870,7 @@ function ButtonListEditor({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs text-muted-foreground">Buttons (optional, up to 3)</Label>
-        {node.buttons.length < 3 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onUpdate({ buttons: [...node.buttons, emptyButton()] })}
-          >
-            <Plus size={12} />
-            Add button
-          </Button>
-        )}
-      </div>
-
+      {node.buttons.length > 0 && <Label className="text-xs text-muted-foreground">Buttons (up to 3)</Label>}
       {node.buttons.map((button) => (
         <div key={button.id} className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-border bg-background p-3">
           <div className="flex items-start gap-3">
@@ -766,6 +896,7 @@ function ButtonListEditor({
                   onChange={(e) => updateButton(button.id, { type: e.target.value as ActionButtonKind })}
                 >
                   <option value="WEB_URL">Open a link</option>
+                  <option value="FOLLOW_PROFILE">Follow me (opens your profile)</option>
                   <option value="POSTBACK">Send a reply when tapped</option>
                 </Select>
               </div>
@@ -780,7 +911,12 @@ function ButtonListEditor({
             </button>
           </div>
 
-          {button.type === 'WEB_URL' ? (
+          {button.type === 'FOLLOW_PROFILE' ? (
+            <p className="text-xs text-muted-foreground">
+              Opens your Instagram profile so they can follow you, then they come back to this chat. To unlock
+              something only for followers, use a reply button with &ldquo;Require a follow&rdquo; instead.
+            </p>
+          ) : button.type === 'WEB_URL' ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor={`btn-url-${button.id}`} className="text-xs text-muted-foreground">
                 Link
@@ -814,22 +950,26 @@ function ButtonListEditor({
                     <MergeTagBar
                       options={mergeFieldOptions}
                       onInsert={(tag) =>
-                        insertMergeTag(`btn-unlocked-${button.id}`, button.unlockedText, (v) => updateButton(button.id, { unlockedText: v }), tag)
+                        insertTagIntoEditor(`btn-unlocked-${button.id}`, tag, labelFor)
                       }
                     />
-                    <textarea
+                    <MergeTagEditor
                       id={`btn-unlocked-${button.id}`}
                       value={button.unlockedText}
-                      onChange={(e) => updateButton(button.id, { unlockedText: e.target.value })}
-                      rows={2}
+                      onChange={(v) => updateButton(button.id, { unlockedText: v })}
+                      labelFor={labelFor}
                       placeholder="Here's your link: ..."
-                      className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                      className="min-h-16 bg-card !px-3 !py-2 !text-sm"
+                    />
+                    <ReplyLinkButtons
+                      buttons={button.unlockedButtons}
+                      onChange={(next) => updateButton(button.id, { unlockedButtons: next })}
                     />
                   </>
                 )}
                 <MediaAttachmentEditor
                   media={button.unlockedMedia}
-                  onAttach={(media) => updateButton(button.id, { unlockedMedia: media, unlockedText: '' })}
+                  onAttach={(media) => updateButton(button.id, { unlockedMedia: media, unlockedText: '', unlockedButtons: [] })}
                   onRemove={() => updateButton(button.id, { unlockedMedia: null })}
                 />
               </div>
@@ -842,22 +982,26 @@ function ButtonListEditor({
                       <MergeTagBar
                         options={mergeFieldOptions}
                         onInsert={(tag) =>
-                          insertMergeTag(`btn-locked-${button.id}`, button.lockedText, (v) => updateButton(button.id, { lockedText: v }), tag)
+                          insertTagIntoEditor(`btn-locked-${button.id}`, tag, labelFor)
                         }
                       />
-                      <textarea
+                      <MergeTagEditor
                         id={`btn-locked-${button.id}`}
                         value={button.lockedText}
-                        onChange={(e) => updateButton(button.id, { lockedText: e.target.value })}
-                        rows={2}
+                        onChange={(v) => updateButton(button.id, { lockedText: v })}
+                        labelFor={labelFor}
                         placeholder="Follow me first, then tap the button again!"
-                        className="w-full resize-none rounded-[var(--radius-control)] border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent"
+                        className="min-h-16 bg-card !px-3 !py-2 !text-sm"
+                      />
+                      <ReplyLinkButtons
+                        buttons={button.lockedButtons}
+                        onChange={(next) => updateButton(button.id, { lockedButtons: next })}
                       />
                     </>
                   )}
                   <MediaAttachmentEditor
                     media={button.lockedMedia}
-                    onAttach={(media) => updateButton(button.id, { lockedMedia: media, lockedText: '' })}
+                    onAttach={(media) => updateButton(button.id, { lockedMedia: media, lockedText: '', lockedButtons: [] })}
                     onRemove={() => updateButton(button.id, { lockedMedia: null })}
                   />
                 </div>
@@ -866,6 +1010,27 @@ function ButtonListEditor({
           )}
         </div>
       ))}
+
+      {node.buttons.length < 3 && (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onUpdate({ buttons: [...node.buttons, emptyButton()] })}
+            className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+          >
+            <Plus size={14} />
+            Add button
+          </button>
+          <button
+            type="button"
+            onClick={() => onUpdate({ buttons: [...node.buttons, { ...emptyButton(), type: 'FOLLOW_PROFILE', title: 'Follow me' }] })}
+            className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+          >
+            <UserPlus size={14} />
+            Follow me button
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -887,10 +1052,12 @@ function MediaAttachmentEditor({
   media,
   onAttach,
   onRemove,
+  inputId,
 }: {
   media: MediaNode | null;
   onAttach: (media: MediaNode) => void;
   onRemove: () => void;
+  inputId?: string;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -944,18 +1111,16 @@ function MediaAttachmentEditor({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <input ref={inputRef} type="file" accept={ACCEPTED_MEDIA_TYPES} onChange={handleFileSelected} className="hidden" />
-      <Button
+      <input ref={inputRef} id={inputId} type="file" accept={ACCEPTED_MEDIA_TYPES} onChange={handleFileSelected} className="hidden" />
+      <button
         type="button"
-        variant="outline"
-        size="sm"
-        className="w-fit"
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
+        className="flex w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground disabled:opacity-60"
       >
-        {uploading ? <CircleNotch size={13} className="animate-spin" /> : <Paperclip size={13} />}
-        {uploading ? 'Uploading…' : 'Attach a photo, video, audio, or PDF'}
-      </Button>
+        {uploading ? <CircleNotch size={14} className="animate-spin" /> : <Paperclip size={14} />}
+        {uploading ? 'Uploading...' : 'Attach a photo, video, audio, or PDF'}
+      </button>
       {error && (
         <p className="flex items-center gap-1.5 text-xs text-danger">
           <WarningCircle size={13} />

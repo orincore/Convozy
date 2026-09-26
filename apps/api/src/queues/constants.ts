@@ -10,6 +10,7 @@ export enum QueueName {
   BILLING_EVENTS = 'billing-events',
   TOKEN_REFRESH = 'token-refresh',
   POSTBACK_EVENTS = 'postback-events',
+  TICKETS_SYNC = 'tickets-sync',
 }
 
 export function deadLetterQueueName(queue: QueueName): string {

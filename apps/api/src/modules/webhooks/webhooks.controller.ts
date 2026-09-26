@@ -107,8 +107,7 @@ export class WebhooksController {
           continue;
         }
 
-        const jobData = this.mapMessagingEventToJobData(messagingEvent, instagramAccountId);
-        if (jobData) {
+        for (const jobData of this.mapMessagingEventToJobData(messagingEvent, instagramAccountId)) {
           await this.webhooksService.enqueueIfNew(jobData);
         }
       }
@@ -140,36 +139,74 @@ export class WebhooksController {
   }
 
   /**
-   * Only story replies are handled here — plain DMs (`message` with no
-   * `reply_to.story`) are intentionally skipped until DM automations are
-   * actually requested and their own recipient handling is designed.
+   * Maps one messaging event to zero or more trigger events:
+   *  - STORY_REPLY: a message with `reply_to.story`
+   *  - STORY_MENTION: a message with a `story_mention` attachment
+   *  - REFERRAL: a `messaging_referral` event, or a first message that
+   *    carries `referral` (ig.me link / ad click). `text` holds the ref value
+   *    so keyword matching works against it. Emitted as its own event id
+   *    (`<mid>:referral`) so it never collides with the DM event below.
+   *  - DM: any other real message (text or attachment), including the first
+   *    message of a referral thread
+   * Echoes/self/deleted/unsupported messages are ignored.
    *
    * `fromUsername` is set to the sender's IG-scoped user ID, not a real
-   * username: unlike comments, this webhook payload doesn't include one,
-   * and resolving it would mean an extra Graph API call on every incoming
-   * message. Known simplification, flagged in TRACKER.md — the
-   * `{{username}}` template will show a numeric ID for story-reply-
-   * triggered actions, not a handle. This same field doubles as the
-   * outbound recipient ID for the reply (see AutomationsService.dispatchAction
-   * and MessagingService — a story reply must be answered via
-   * `{ recipient: { id } }`, not `{ recipient: { comment_id } }`).
+   * username: unlike comments, these payloads don't include one, and
+   * resolving it would mean an extra Graph API call on every incoming
+   * message. Known simplification, flagged in TRACKER.md - the
+   * `{{username}}` template resolves through a profile fetch instead. This
+   * same field doubles as the outbound recipient ID for the reply (see
+   * AutomationsService.dispatchAction and MessagingService - conversation-
+   * sourced events are answered via `{ recipient: { id } }`).
    */
   private mapMessagingEventToJobData(
     event: NonNullable<MetaWebhookPayload['entry'][number]['messaging']>[number],
     instagramAccountId: string,
-  ): WebhookEventJobData | null {
-    if (!event.message?.mid || !event.message.reply_to?.story) {
-      return null;
-    }
-
-    return {
-      externalEventId: event.message.mid,
+  ): WebhookEventJobData[] {
+    const base = {
       instagramAccountId,
-      source: 'STORY_REPLY',
       fromUsername: event.sender.id,
       fromIgScopedId: event.sender.id,
-      text: event.message.text ?? '',
       receivedAt: new Date(event.timestamp * 1000).toISOString(),
     };
+    const message = event.message;
+
+    if (!message) {
+      // messaging_referral (no message body): identified by sender + timestamp.
+      if (event.referral) {
+        return [
+          {
+            ...base,
+            externalEventId: `referral:${event.sender.id}:${event.timestamp}`,
+            source: 'REFERRAL',
+            text: event.referral.ref ?? '',
+          },
+        ];
+      }
+      return [];
+    }
+
+    if (!message.mid || message.is_echo || message.is_self || message.is_deleted || message.is_unsupported) {
+      return [];
+    }
+
+    const events: WebhookEventJobData[] = [];
+    if (message.referral) {
+      events.push({
+        ...base,
+        externalEventId: `${message.mid}:referral`,
+        source: 'REFERRAL',
+        text: message.referral.ref ?? '',
+      });
+    }
+
+    if (message.reply_to?.story) {
+      events.push({ ...base, externalEventId: message.mid, source: 'STORY_REPLY', text: message.text ?? '' });
+    } else if (message.attachments?.some((a) => a.type === 'story_mention')) {
+      events.push({ ...base, externalEventId: message.mid, source: 'STORY_MENTION', text: '' });
+    } else {
+      events.push({ ...base, externalEventId: message.mid, source: 'DM', text: message.text ?? '' });
+    }
+    return events;
   }
 }

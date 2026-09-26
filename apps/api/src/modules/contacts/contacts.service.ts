@@ -79,15 +79,15 @@ export class ContactsService {
 
   async listContacts(
     workspaceId: string,
+    instagramAccountId: string,
     query: ListContactsQueryDto,
   ): Promise<{ contacts: ContactWithRelations[]; total: number; page: number; pageSize: number }> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
 
-    const where: Prisma.ContactWhereInput = { workspaceId };
-    if (query.instagramAccountId) {
-      where.instagramAccountId = query.instagramAccountId;
-    }
+    // Always the selected account: the client-supplied filter is ignored so a
+    // contact list can never mix accounts.
+    const where: Prisma.ContactWhereInput = { workspaceId, instagramAccountId };
     if (query.tagId) {
       where.tags = { some: { tagId: query.tagId } };
     }
@@ -140,8 +140,12 @@ export class ContactsService {
   }
 
   async addTagToContact(workspaceId: string, contactId: string, tagId: string): Promise<void> {
-    await this.getOwnedContact(workspaceId, contactId);
-    await this.getOwnedTag(workspaceId, tagId);
+    const contact = await this.getOwnedContact(workspaceId, contactId);
+    const tag = await this.getOwnedTag(workspaceId, tagId);
+    // A tag belongs to one Instagram account and only tags that account's contacts.
+    if (tag.instagramAccountId !== contact.instagramAccountId) {
+      throw new NotFoundAppException('TAG_NOT_FOUND', 'Tag not found.');
+    }
     await this.prisma.contactTag.upsert({
       where: { contactId_tagId: { contactId, tagId } },
       create: { contactId, tagId },
@@ -155,8 +159,11 @@ export class ContactsService {
   }
 
   async setFieldValue(workspaceId: string, contactId: string, customFieldId: string, rawValue: string): Promise<void> {
-    await this.getOwnedContact(workspaceId, contactId);
+    const contact = await this.getOwnedContact(workspaceId, contactId);
     const field = await this.getOwnedCustomField(workspaceId, customFieldId);
+    if (field.instagramAccountId !== contact.instagramAccountId) {
+      throw new NotFoundAppException('CUSTOM_FIELD_NOT_FOUND', 'Custom field not found.');
+    }
     this.validateFieldValue(field.type, rawValue);
 
     await this.prisma.contactFieldValue.upsert({
@@ -192,12 +199,12 @@ export class ContactsService {
 
   // ── Tags ──────────────────────────────────────────────────────────────
 
-  listTags(workspaceId: string): Promise<Tag[]> {
-    return this.prisma.tag.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+  listTags(workspaceId: string, instagramAccountId: string): Promise<Tag[]> {
+    return this.prisma.tag.findMany({ where: { workspaceId, instagramAccountId }, orderBy: { name: 'asc' } });
   }
 
-  async createTag(workspaceId: string, dto: CreateTagDto): Promise<Tag> {
-    return this.prisma.tag.create({ data: { workspaceId, name: dto.name, color: dto.color } });
+  async createTag(workspaceId: string, instagramAccountId: string, dto: CreateTagDto): Promise<Tag> {
+    return this.prisma.tag.create({ data: { workspaceId, instagramAccountId, name: dto.name, color: dto.color } });
   }
 
   async deleteTag(workspaceId: string, id: string): Promise<void> {
@@ -223,13 +230,13 @@ export class ContactsService {
 
   // ── Custom fields ─────────────────────────────────────────────────────
 
-  listCustomFields(workspaceId: string) {
-    return this.prisma.customField.findMany({ where: { workspaceId }, orderBy: { label: 'asc' } });
+  listCustomFields(workspaceId: string, instagramAccountId: string) {
+    return this.prisma.customField.findMany({ where: { workspaceId, instagramAccountId }, orderBy: { label: 'asc' } });
   }
 
-  async createCustomField(workspaceId: string, dto: CreateCustomFieldDto) {
+  async createCustomField(workspaceId: string, instagramAccountId: string, dto: CreateCustomFieldDto) {
     return this.prisma.customField.create({
-      data: { workspaceId, key: dto.key, label: dto.label, type: dto.type },
+      data: { workspaceId, instagramAccountId, key: dto.key, label: dto.label, type: dto.type },
     });
   }
 
@@ -248,18 +255,18 @@ export class ContactsService {
 
   // ── Segments ──────────────────────────────────────────────────────────
 
-  listSegments(workspaceId: string): Promise<Segment[]> {
-    return this.prisma.segment.findMany({ where: { workspaceId }, orderBy: { name: 'asc' } });
+  listSegments(workspaceId: string, instagramAccountId: string): Promise<Segment[]> {
+    return this.prisma.segment.findMany({ where: { workspaceId, instagramAccountId }, orderBy: { name: 'asc' } });
   }
 
   async getSegment(workspaceId: string, id: string): Promise<Segment> {
     return this.getOwnedSegment(workspaceId, id);
   }
 
-  async createSegment(workspaceId: string, dto: CreateSegmentDto): Promise<Segment> {
+  async createSegment(workspaceId: string, instagramAccountId: string, dto: CreateSegmentDto): Promise<Segment> {
     this.validateSegmentRule(dto.rules);
     return this.prisma.segment.create({
-      data: { workspaceId, name: dto.name, rules: dto.rules as unknown as object },
+      data: { workspaceId, instagramAccountId, name: dto.name, rules: dto.rules as unknown as object },
     });
   }
 
@@ -289,6 +296,8 @@ export class ContactsService {
     const segment = await this.getOwnedSegment(workspaceId, id);
     const where: Prisma.ContactWhereInput = {
       workspaceId,
+      // A segment only ever contains contacts of the account it belongs to.
+      ...(segment.instagramAccountId ? { instagramAccountId: segment.instagramAccountId } : {}),
       ...this.buildSegmentWhere(segment.rules as unknown as SegmentRuleDto),
     };
     const [contacts, total] = await Promise.all([
@@ -308,6 +317,8 @@ export class ContactsService {
     const segment = await this.getOwnedSegment(workspaceId, id);
     const where: Prisma.ContactWhereInput = {
       workspaceId,
+      // A segment only ever contains contacts of the account it belongs to.
+      ...(segment.instagramAccountId ? { instagramAccountId: segment.instagramAccountId } : {}),
       ...this.buildSegmentWhere(segment.rules as unknown as SegmentRuleDto),
     };
     return this.prisma.contact.count({ where });

@@ -26,7 +26,7 @@ const TOKEN_REFRESH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 // "messaging_postbacks" notifies when a person taps a postback-type button
 // on a Button Template message (messaging-api/button-template) — needed for
 // the interactive-DM-button feature, same permissions already granted.
-const WEBHOOK_SUBSCRIBED_FIELDS = 'comments,live_comments,messages,messaging_postbacks';
+const WEBHOOK_SUBSCRIBED_FIELDS = 'comments,live_comments,messages,messaging_postbacks,messaging_referral';
 
 // Business Login for Instagram (docs: developers.facebook.com/documentation/
 // instagram-platform/instagram-api-with-instagram-login/business-login).
@@ -215,6 +215,15 @@ export class InstagramService {
    * 5 consecutive failures. Found live 2026-09-23 (@orincore.official stuck
    * on RATE_LIMITED with the circuit long since closed).
    */
+  /** The connected account's own username, for building its profile link. */
+  async getAccountUsername(instagramAccountId: string): Promise<string | null> {
+    const account = await this.prisma.instagramAccount.findUnique({
+      where: { id: instagramAccountId },
+      select: { igUsername: true },
+    });
+    return account?.igUsername ?? null;
+  }
+
   async getSendCredentials(
     instagramAccountId: string,
   ): Promise<{ accessToken: string; igBusinessId: string } | null> {
@@ -277,6 +286,74 @@ export class InstagramService {
       permalink: item.permalink,
       timestamp: item.timestamp,
     }));
+  }
+
+  /** Permalink + caption of one of the account's own posts, for showing what a ticket is about. Null on any failure. */
+  async getMediaInfo(instagramAccountId: string, mediaId: string): Promise<{ permalink: string | null; caption: string | null } | null> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return null;
+    }
+    const meta = this.configService.get('meta', { infer: true });
+    const params = new URLSearchParams({ fields: 'permalink,caption', access_token: credentials.accessToken });
+    try {
+      const res = await fetch(`https://graph.instagram.com/${meta.graphApiVersion}/${mediaId}?${params.toString()}`);
+      if (!res.ok) return null;
+      const json = (await res.json()) as { permalink?: string; caption?: string };
+      return { permalink: json.permalink ?? null, caption: json.caption ?? null };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Public posts that tag this account (GET /<ig-user-id>/tags), verified live
+   * 2026-09-28 against graph.instagram.com. Read-only: the poster's username is
+   * returned but not their IG-scoped ID, and Meta doesn't allow commenting on
+   * photos you're tagged in, so nothing can be sent back. Null on failure.
+   */
+  async listTaggedMedia(
+    instagramAccountId: string,
+  ): Promise<{ id: string; caption: string | null; permalink: string | null; username: string | null; timestamp: string | null }[] | null> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return null;
+    }
+    const meta = this.configService.get('meta', { infer: true });
+    const params = new URLSearchParams({
+      fields: 'id,caption,permalink,username,timestamp',
+      limit: '25',
+      access_token: credentials.accessToken,
+    });
+    try {
+      const res = await fetch(`https://graph.instagram.com/${meta.graphApiVersion}/${credentials.igBusinessId}/tags?${params.toString()}`);
+      if (!res.ok) {
+        this.logger.warn(`Tagged media fetch failed for account ${instagramAccountId}: ${res.status}`);
+        return null;
+      }
+      const { data } = (await res.json()) as {
+        data: { id: string; caption?: string; permalink?: string; username?: string; timestamp?: string }[];
+      };
+      return data.map((m) => ({
+        id: m.id,
+        caption: m.caption ?? null,
+        permalink: m.permalink ?? null,
+        username: m.username ?? null,
+        timestamp: m.timestamp ?? null,
+      }));
+    } catch (err) {
+      this.logger.warn(`Tagged media fetch threw for account ${instagramAccountId}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  /** IDs of every ACTIVE connected account, for periodic per-account syncs. */
+  async listActiveAccountIds(): Promise<string[]> {
+    const accounts = await this.prisma.instagramAccount.findMany({
+      where: { status: InstagramAccountStatus.ACTIVE },
+      select: { id: true },
+    });
+    return accounts.map((a) => a.id);
   }
 
   /** Used by the messaging module's DLQ requeue scan to skip permanently-broken accounts. */
@@ -346,6 +423,11 @@ export class InstagramService {
       response_type: 'code',
       scope: OAUTH_SCOPES,
       state,
+      // Always show Instagram's own login screen, even when a browser is
+      // already signed in, so a creator can connect a *different* account than
+      // the one their browser happens to be logged into (Business Login docs:
+      // force_reauth forces credential login).
+      force_reauth: 'true',
     });
 
     return `https://www.instagram.com/oauth/authorize?${params.toString()}`;

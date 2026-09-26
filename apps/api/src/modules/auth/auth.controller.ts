@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Param,
   HttpStatus,
   Post,
   Req,
@@ -32,6 +33,12 @@ export class AuthController {
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
+  }
+
+  @Public()
+  @Get('invites/:token')
+  previewInvite(@Param('token') token: string) {
+    return this.authService.previewInvite(token);
   }
 
   @Public()

@@ -39,7 +39,15 @@ jest.mock('@nestjs/common', () => {
   };
 });
 
+// TicketsService pulls in the messaging/instagram modules (ESM-only
+// dependencies ts-jest can't load); this suite only needs a stand-in class.
+jest.mock('../../modules/tickets/tickets.service', () => ({ TicketsService: class {} }));
+
 import { WebhookEventsProcessor, WebhookEventJobData } from './webhook-events.processor';
+
+function makeTicketsService() {
+  return { ingestEvent: jest.fn().mockResolvedValue(undefined) } as any;
+}
 
 function makeContactsService() {
   return { recordInbound: jest.fn().mockResolvedValue(undefined) } as any;
@@ -68,7 +76,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
     await processor.process(makeJob());
 
     expect(prisma.commentEvent.create).not.toHaveBeenCalled();
@@ -86,7 +94,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
     await processor.process(makeJob());
 
     expect(prisma.commentEvent.create).toHaveBeenCalledWith(
@@ -113,7 +121,7 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
     await processor.process(makeJob({ fromIgScopedId: 'ig-scoped-1', fromUsername: 'viewer123' }));
 
     expect(contactsService.recordInbound).toHaveBeenCalledWith(
@@ -132,7 +140,7 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
     await processor.process(
       makeJob({ source: 'STORY_REPLY', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }),
     );
@@ -148,7 +156,7 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = { recordInbound: jest.fn().mockRejectedValue(new Error('db hiccup')) } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
     await expect(processor.process(makeJob())).resolves.toBeUndefined();
 
     expect(queue.add).toHaveBeenCalled();
@@ -169,7 +177,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
     await expect(processor.process(makeJob())).resolves.toBeUndefined();
 
     expect(queue.add).not.toHaveBeenCalled();
@@ -186,7 +194,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
     await expect(processor.process(makeJob())).rejects.toThrow('connection reset');
   });
 });

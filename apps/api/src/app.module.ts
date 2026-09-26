@@ -11,6 +11,8 @@ import { CorrelationIdMiddleware } from './common/middleware/correlation-id.midd
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { RolesGuard } from './common/guards/roles.guard';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { TicketsModule } from './modules/tickets/tickets.module';
+import { TeamModule } from './modules/team/team.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { InstagramModule } from './modules/instagram/instagram.module';
@@ -45,6 +47,8 @@ import { MediaModule } from './modules/media/media.module';
     ActivityModule,
     ContactsModule,
     MediaModule,
+    TicketsModule,
+    TeamModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },

@@ -36,6 +36,11 @@ model User {
 
   auditLogs AuditLog[]
 
+  assignedTickets Ticket[] @relation("TicketAssignee")
+  ticketMessages  TicketMessage[]
+  ticketEvents    TicketEvent[]
+  invitesSent     WorkspaceInvite[]
+
   @@index([workspaceId])
 }
 
@@ -59,6 +64,9 @@ model Workspace {
   tags               Tag[]
   customFields       CustomField[]
   segments           Segment[]
+  tickets            Ticket[]
+  ticketSettings     TicketSettings[]
+  invites            WorkspaceInvite[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,11 +123,17 @@ model InstagramAccount {
   commentEvents CommentEvent[]
   messageLogs   MessageLog[]
   contacts      Contact[]
+  tags          Tag[]
+  customFields  CustomField[]
+  segments      Segment[]
+  ticketSettings TicketSettings?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([workspaceId])
+
+  tickets Ticket[]
 }
 
 enum InstagramAccountStatus {
@@ -192,6 +206,8 @@ enum TriggerSource {
   DM
   STORY_REPLY
   LIVE_COMMENT
+  STORY_MENTION
+  REFERRAL
 }
 
 enum TriggerMatchType {
@@ -503,12 +519,19 @@ model Contact {
 
   @@unique([workspaceId, instagramAccountId, igScopedId])
   @@index([workspaceId])
+
+  ticketParticipants TicketParticipant[]
 }
 
 model Tag {
   id          String @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Everything a creator manages is per connected Instagram account: this row
+  // belongs to exactly one, and disappears with it. Nullable only so rows that
+  // pre-date multi-account could be backfilled (to the workspace's first account).
+  instagramAccountId String?
+  instagramAccount   InstagramAccount? @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
 
   name  String
   color String?
@@ -518,7 +541,8 @@ model Tag {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([workspaceId, name])
+  @@unique([instagramAccountId, name])
+  @@index([workspaceId])
 }
 
 model ContactTag {
@@ -536,6 +560,11 @@ model CustomField {
   id          String @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Everything a creator manages is per connected Instagram account: this row
+  // belongs to exactly one, and disappears with it. Nullable only so rows that
+  // pre-date multi-account could be backfilled (to the workspace's first account).
+  instagramAccountId String?
+  instagramAccount   InstagramAccount? @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
 
   key   String // machine key, e.g. "shirt_size"
   label String // display label, e.g. "Shirt size"
@@ -546,7 +575,8 @@ model CustomField {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([workspaceId, key])
+  @@unique([instagramAccountId, key])
+  @@index([workspaceId])
 }
 
 enum CustomFieldType {
@@ -584,6 +614,11 @@ model Segment {
   id          String @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Everything a creator manages is per connected Instagram account: this row
+  // belongs to exactly one, and disappears with it. Nullable only so rows that
+  // pre-date multi-account could be backfilled (to the workspace's first account).
+  instagramAccountId String?
+  instagramAccount   InstagramAccount? @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
 
   name String
   // SegmentRule tree: { all: SegmentRule[] } | { any: SegmentRule[] } |
@@ -594,7 +629,8 @@ model Segment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([workspaceId, name])
+  @@unique([instagramAccountId, name])
+  @@index([workspaceId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -613,6 +649,211 @@ model AuditLog {
   metadata Json?
 
   createdAt DateTime @default(now())
+
+  @@index([workspaceId])
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// tickets module (support CRM) + team invites
+// ─────────────────────────────────────────────────────────────────────────
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketSource {
+  COMMENT
+  DM
+  STORY_MENTION
+  REFERRAL
+  TAGGED_POST
+}
+
+enum TicketMessageKind {
+  INBOUND
+  OUTBOUND
+  NOTE
+}
+
+enum TicketMessageChannel {
+  COMMENT
+  DM
+  PUBLIC_REPLY
+  NOTE
+  TAGGED_POST
+}
+
+enum TicketMessageStatus {
+  SENT
+  FAILED
+}
+
+model Ticket {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  instagramAccountId String
+  instagramAccount   InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  // Human-friendly per-workspace sequence (#1, #2, ...).
+  number Int
+
+  source   TicketSource
+  status   TicketStatus   @default(OPEN)
+  priority TicketPriority @default(NORMAL)
+  subject  String
+
+  // Grouping key so several people complaining about the same post share one
+  // ticket: "media:<id>" for post-scoped sources, "dm:<igsid>", "story:<igsid>",
+  // "ref:<igsid>" otherwise. A new complaint on a resolved/closed ticket
+  // reopens it instead of creating a duplicate.
+  dedupKey String
+
+  mediaId        String?
+  mediaPermalink String?
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  firstResponseAt DateTime?
+  resolvedAt      DateTime?
+  lastActivityAt  DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  participants TicketParticipant[]
+  messages     TicketMessage[]
+  events       TicketEvent[]
+
+  @@unique([instagramAccountId, dedupKey])
+  @@unique([workspaceId, number])
+  @@index([workspaceId, status])
+  @@index([workspaceId, assigneeId])
+}
+
+model TicketParticipant {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  // Null for a tagged post: /me/tags returns the poster's username but no
+  // IG-scoped ID, so there is nobody we can message.
+  igScopedId String?
+  username   String?
+
+  // Drives what an agent may send (Meta rules): a DM only within 24h of their
+  // last inbound message; one private reply per comment within 7 days.
+  lastInboundAt      DateTime?
+  latestCommentId    String?
+  latestCommentAt    DateTime?
+  privateReplySentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  messages TicketMessage[]
+
+  @@unique([ticketId, igScopedId])
+  @@index([igScopedId])
+}
+
+model TicketMessage {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  participantId String?
+  participant   TicketParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+
+  kind    TicketMessageKind
+  channel TicketMessageChannel
+  text    String @db.Text
+
+  // Meta's comment id / message id: dedups redelivered webhooks.
+  externalId String?
+  status     TicketMessageStatus @default(SENT)
+  error      String?
+
+  authorUserId String?
+  author       User?   @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([ticketId, externalId])
+  @@index([ticketId, createdAt])
+}
+
+model TicketEvent {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorUserId String?
+  actor       User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  // CREATED, STATUS_CHANGED, ASSIGNED, PRIORITY_CHANGED, REOPENED, PARTICIPANT_JOINED
+  type String
+  data Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+// One row per Instagram account: what creates a ticket automatically.
+model TicketSettings {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // One row per connected account: each account decides what opens its tickets.
+  instagramAccountId String? @unique
+  instagramAccount   InstagramAccount? @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  enabled Boolean @default(true)
+  // Comments/DMs containing any of these (case-insensitive) become tickets.
+  keywords String[]
+  // A comment on your post that @mentions your handle becomes a ticket.
+  createFromMentions       Boolean @default(true)
+  createFromAllDms         Boolean @default(false)
+  createFromStoryMentions  Boolean @default(true)
+  createFromReferrals      Boolean @default(false)
+  createFromTaggedPosts    Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
+model WorkspaceInvite {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  email String
+  role  UserRole @default(MEMBER)
+  // sha256 of the one-time token; the raw token is shown once at creation.
+  tokenHash String @unique
+
+  invitedById String?
+  invitedBy   User?   @relation(fields: [invitedById], references: [id], onDelete: SetNull)
+
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime @default(now())
 
   @@index([workspaceId])
 }

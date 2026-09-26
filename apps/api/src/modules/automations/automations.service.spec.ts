@@ -188,6 +188,7 @@ function makeService(prismaOverrides: Record<string, any> = {}) {
   const instagramService = {
     accountBelongsToWorkspace: jest.fn().mockResolvedValue(true),
     fetchSenderProfile: jest.fn().mockResolvedValue({ name: null, username: null }),
+    getAccountUsername: jest.fn().mockResolvedValue('creator_handle'),
   } as any;
 
   const contactsService = {
@@ -919,6 +920,45 @@ describe('AutomationsService.resolvePostback', () => {
     );
   });
 
+  it('attaches the reply link buttons to the unlocked message as web_url buttons', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the link',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: false,
+              unlockedText: 'Here you go',
+              unlockedButtons: [{ title: 'Open', url: 'https://example.com/guide' }],
+            },
+          ],
+        },
+      }),
+    );
+
+    await service.resolvePostback({
+      instagramAccountId: 'ig-account-1',
+      senderId: 'ig-scoped-user-1',
+      payload: 'action-1:0',
+      mid: 'mid-9',
+    });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: expect.objectContaining({
+          text: 'Here you go',
+          buttons: [{ title: 'Open', type: 'WEB_URL', url: 'https://example.com/guide' }],
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('sends the unlocked message when gated and the tapper is following', async () => {
     const { service, prisma, instagramService, messageSendQueue } = makeService();
     prisma.action.findUnique.mockResolvedValue(
@@ -1507,6 +1547,18 @@ describe('AutomationsService write-time validation — POSTBACK button replies',
     await expect(service.create('workspace-1', baseCreateInput(sendDmWithButton({})))).rejects.toThrow(AppException);
   });
 
+  it('rejects link buttons on a media-only unlocked reply', async () => {
+    const { service } = makeService();
+    const input = baseCreateInput(
+      sendDmWithButton({
+        unlockedMedia: { type: 'image', url: 'https://cdn.example/a.png' },
+        unlockedButtons: [{ title: 'Open', url: 'https://example.com' }],
+      }),
+    );
+
+    await expect(service.create('workspace-1', input)).rejects.toThrow(AppException);
+  });
+
   it('rejects a POSTBACK button with both unlockedText and unlockedMedia', async () => {
     const { service } = makeService();
 
@@ -1558,5 +1610,140 @@ describe('AutomationsService write-time validation — POSTBACK button replies',
         ),
       ),
     ).resolves.toBeDefined();
+  });
+});
+
+
+describe('AutomationsService FOLLOW_PROFILE buttons', () => {
+  const followAction = () =>
+    makeAutomation({
+      actions: [
+        {
+          id: 'action-1',
+          automationId: 'automation-1',
+          type: ActionType.SEND_DM,
+          order: 0,
+          delaySeconds: 0,
+          payload: { text: 'hi', buttons: [{ title: 'Follow me', type: 'FOLLOW_PROFILE' }] },
+          condition: null,
+          parentId: null,
+          branch: null,
+          children: [],
+        },
+      ],
+    });
+
+  it("sends a FOLLOW_PROFILE button as a web_url to the account's own profile", async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'price' }));
+    prisma.automation.findMany.mockResolvedValue([followAction()]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: expect.objectContaining({
+          buttons: [{ title: 'Follow me', type: 'WEB_URL', url: 'https://www.instagram.com/creator_handle/' }],
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('drops the button instead of sending an empty link when the account has no username', async () => {
+    const { service, prisma, messageSendQueue, instagramService } = makeService();
+    instagramService.getAccountUsername.mockResolvedValue(null);
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'price' }));
+    prisma.automation.findMany.mockResolvedValue([followAction()]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ content: expect.objectContaining({ buttons: [] }) }),
+      expect.any(Object),
+    );
+  });
+});
+
+
+describe('AutomationsService DM trigger', () => {
+  const dmAutomation = () =>
+    makeAutomation({
+      triggers: [
+        {
+          id: 'trigger-dm',
+          automationId: 'automation-1',
+          source: TriggerSource.DM,
+          matchType: TriggerMatchType.CONTAINS,
+          keywords: [],
+          caseSensitive: false,
+        },
+      ],
+    });
+  const dmEvent = () => makeCommentEvent({ source: TriggerSource.DM, fromUsername: 'sender-1', fromIgScopedId: 'sender-1', text: 'hello' });
+
+  it('replies to the sender by user id, not a comment id', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(dmEvent());
+    prisma.automation.findMany.mockResolvedValue([dmAutomation()]);
+    prisma.commentEvent.findFirst = jest.fn().mockResolvedValue(null);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ recipientId: 'sender-1', recipientType: 'user' }),
+      expect.any(Object),
+    );
+  });
+
+  it('does not reply again to the same sender within the cooldown window', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(dmEvent());
+    prisma.automation.findMany.mockResolvedValue([dmAutomation()]);
+    prisma.commentEvent.findFirst = jest.fn().mockResolvedValue({ id: 'earlier-event' });
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
+    expect(prisma.commentEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'NO_MATCH' }) }),
+    );
+  });
+
+  it.each([TriggerSource.STORY_MENTION, TriggerSource.REFERRAL])('%s events reply to the sender by user id', async (source) => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ source, fromUsername: 'sender-1', fromIgScopedId: 'sender-1', text: '' }));
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          { id: 't', automationId: 'automation-1', source, matchType: TriggerMatchType.CONTAINS, keywords: [], caseSensitive: false },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ recipientId: 'sender-1', recipientType: 'user' }),
+      expect.any(Object),
+    );
+  });
+});
+
+
+describe('AutomationsService.list account scoping', () => {
+  it('lists only the selected account’s automations', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.findMany.mockResolvedValue([]);
+
+    await service.list('workspace-1', 'ig-account-9');
+
+    expect(prisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { workspaceId: 'workspace-1', instagramAccountId: 'ig-account-9' } }),
+    );
   });
 });

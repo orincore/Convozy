@@ -5,18 +5,19 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ContactsService } from '../../modules/contacts/contacts.service';
 import { QueueName } from '../constants';
+import { TicketsService } from '../../modules/tickets/tickets.service';
 import { AutomationMatchJobData } from './automation-match.processor';
 
 export interface WebhookEventJobData {
   externalEventId: string;
   instagramAccountId: string;
-  source: 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT';
+  source: 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT' | 'STORY_MENTION' | 'REFERRAL';
   mediaId?: string;
   fromUsername: string;
   // The commenter/sender's IG-scoped user ID — Contact rows are keyed on
   // this. Nullable: additive, and comment-sourced events before this field
   // existed won't have it until Meta redelivers (see CommentEvent's own
-  // comment). For STORY_REPLY this is the same value as fromUsername (that
+  // comment). For conversation-sourced events (STORY_REPLY, DM, STORY_MENTION, REFERRAL) this is the same value as fromUsername (that
   // field already carries the IG-scoped ID for conversation-sourced events).
   fromIgScopedId?: string;
   text: string;
@@ -34,6 +35,7 @@ export class WebhookEventsProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly contactsService: ContactsService,
+    private readonly ticketsService: TicketsService,
     @InjectQueue(QueueName.AUTOMATION_MATCH)
     private readonly automationMatchQueue: Queue<AutomationMatchJobData>,
   ) {
@@ -96,11 +98,18 @@ export class WebhookEventsProcessor extends WorkerHost {
         account.workspaceId,
         data.instagramAccountId,
         data.fromIgScopedId,
-        data.source === 'STORY_REPLY' ? undefined : data.fromUsername,
+        data.source === 'COMMENT' || data.source === 'LIVE_COMMENT' ? data.fromUsername : undefined,
       )
       .catch((err) => {
         this.logger.error(`Contact tracking failed for event ${data.externalEventId}: ${(err as Error).message}`);
       });
+
+    // Complaint tracking is independent of automations: a comment/DM can become
+    // a ticket whether or not a rule replies to it. Non-fatal for the same
+    // reason as contact tracking above.
+    await this.ticketsService.ingestEvent(commentEventId).catch((err) => {
+      this.logger.error(`Ticket ingest failed for event ${data.externalEventId}: ${(err as Error).message}`);
+    });
 
     await this.automationMatchQueue.add(
       'match',

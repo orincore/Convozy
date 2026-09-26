@@ -17,9 +17,9 @@ const FEED_LIMIT = 50;
 export class ActivityService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listRecentEvents(workspaceId: string) {
+  async listRecentEvents(workspaceId: string, instagramAccountId: string) {
     return this.prisma.commentEvent.findMany({
-      where: { workspaceId },
+      where: { workspaceId, instagramAccountId },
       orderBy: { receivedAt: 'desc' },
       take: FEED_LIMIT,
       select: {

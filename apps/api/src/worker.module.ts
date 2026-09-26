@@ -10,6 +10,8 @@ import { InstagramModule } from './modules/instagram/instagram.module';
 import { AutomationsModule } from './modules/automations/automations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
+import { TicketsSyncProcessor } from './queues/processors/tickets-sync.processor';
 import { WebhookEventsProcessor } from './queues/processors/webhook-events.processor';
 import { AutomationMatchProcessor } from './queues/processors/automation-match.processor';
 import { MessageSendProcessor } from './queues/processors/message-send.processor';
@@ -39,6 +41,7 @@ import { PostbackEventsProcessor } from './queues/processors/postback-events.pro
     AutomationsModule,
     MessagingModule,
     ContactsModule,
+    TicketsModule,
   ],
   providers: [
     WebhookEventsProcessor,
@@ -47,6 +50,7 @@ import { PostbackEventsProcessor } from './queues/processors/postback-events.pro
     AiProcessingProcessor,
     TokenRefreshProcessor,
     PostbackEventsProcessor,
+    TicketsSyncProcessor,
   ],
 })
 export class WorkerModule {}

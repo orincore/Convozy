@@ -78,6 +78,20 @@ function buildActionsInclude(depth: number, isRoot = false): any {
   }
   return result;
 }
+// Sources answered by DMing the sender directly (there is no comment to
+// private-reply to, hide, or publicly reply under).
+const CONVERSATION_SOURCES: TriggerSource[] = [
+  TriggerSource.STORY_REPLY,
+  TriggerSource.DM,
+  TriggerSource.STORY_MENTION,
+  TriggerSource.REFERRAL,
+];
+
+// A plain-DM trigger fires on every inbound message, so the same automation
+// answers a given sender at most once per this window - without it a
+// keyword-less DM automation would reply to every message in a conversation.
+const DM_REPLY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 const ACTIONS_INCLUDE: any = buildActionsInclude(MAX_ACTION_TREE_DEPTH, true);
 
 @Injectable()
@@ -95,13 +109,13 @@ export class AutomationsService {
 
   // ── CRUD ──────────────────────────────────────────────────────────────
 
-  async list(workspaceId: string): Promise<AutomationWithRelations[]> {
+  async list(workspaceId: string, instagramAccountId: string): Promise<AutomationWithRelations[]> {
     // Cast justified by the ACTIONS_INCLUDE comment above: Prisma can't
     // statically type an arbitrary-depth recursive include, so it falls
     // back to the base (non-recursive) Action shape here — the real,
     // recursive shape actually returned at runtime is ActionWithTree.
     return this.prisma.automation.findMany({
-      where: { workspaceId },
+      where: { workspaceId, instagramAccountId },
       include: { triggers: true, actions: ACTIONS_INCLUDE },
       orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
     }) as unknown as Promise<AutomationWithRelations[]>;
@@ -356,6 +370,12 @@ export class AutomationsService {
           if (!button.unlockedText && !button.unlockedMedia) {
             throw new AppException('INVALID_ACTION', `Button "${button.title}" needs a reply (text or media) for when it's tapped.`);
           }
+          if (button.unlockedButtons?.length && !button.unlockedText) {
+            throw new AppException(
+              'INVALID_ACTION',
+              `Button "${button.title}"'s reply needs text to carry link buttons (a media reply can't have buttons).`,
+            );
+          }
           if (button.requireFollow) {
             if (button.lockedText && button.lockedMedia) {
               throw new AppException(
@@ -367,6 +387,12 @@ export class AutomationsService {
               throw new AppException(
                 'INVALID_ACTION',
                 `Button "${button.title}" requires following, so it needs a locked reply (text or media) too.`,
+              );
+            }
+            if (button.lockedButtons?.length && !button.lockedText) {
+              throw new AppException(
+                'INVALID_ACTION',
+                `Button "${button.title}"'s locked reply needs text to carry link buttons (a media reply can't have buttons).`,
               );
             }
           }
@@ -423,6 +449,28 @@ export class AutomationsService {
         data: { status: CommentEventStatus.NO_MATCH, processedAt: new Date() },
       });
       return;
+    }
+
+    if (commentEvent.source === TriggerSource.DM && commentEvent.fromIgScopedId) {
+      const recent = await this.prisma.commentEvent.findFirst({
+        where: {
+          instagramAccountId: commentEvent.instagramAccountId,
+          fromIgScopedId: commentEvent.fromIgScopedId,
+          source: TriggerSource.DM,
+          matchedAutomationId: matched.id,
+          status: CommentEventStatus.MATCHED,
+          processedAt: { gte: new Date(Date.now() - DM_REPLY_COOLDOWN_MS) },
+          id: { not: commentEvent.id },
+        },
+        select: { id: true },
+      });
+      if (recent) {
+        await this.prisma.commentEvent.update({
+          where: { id: commentEvent.id },
+          data: { status: CommentEventStatus.NO_MATCH, processedAt: new Date() },
+        });
+        return;
+      }
     }
 
     // Dispatch BEFORE marking MATCHED, not after: if this throws partway
@@ -578,8 +626,7 @@ export class AutomationsService {
       return;
     }
 
-    const isConversationSourced =
-      commentEvent.source === TriggerSource.STORY_REPLY || commentEvent.source === TriggerSource.DM;
+    const isConversationSourced = CONVERSATION_SOURCES.includes(commentEvent.source);
     if (isConversationSourced && action.type === ActionType.REPLY_COMMENT) {
       // There's no comment thread to publicly reply into for a DM/story
       // reply — this combination is only reachable if someone builds an
@@ -619,7 +666,7 @@ export class AutomationsService {
               username,
             })
           : undefined,
-        buttons: payload.buttons,
+        buttons: await this.resolveButtons(payload.buttons, commentEvent.instagramAccountId),
         media: payload.media,
       };
     }
@@ -666,6 +713,26 @@ export class AutomationsService {
   // left in the output untouched, so a typo is visible instead of silently
   // vanishing.
   private static readonly MERGE_TAG_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+
+  // FOLLOW_PROFILE buttons become plain web_url buttons pointing at the
+  // account's own profile, so the messaging module only ever sees the two
+  // button kinds Meta's Button Template supports.
+  private async resolveButtons(
+    buttons: ActionPayloadDto['buttons'],
+    instagramAccountId: string,
+  ): Promise<ActionPayloadDto['buttons']> {
+    if (!buttons?.some((b) => b.type === 'FOLLOW_PROFILE')) {
+      return buttons;
+    }
+    const username = await this.instagramService.getAccountUsername(instagramAccountId);
+    // No username to link to (account row gone): drop the button rather than
+    // send Meta a web_url with no url, which would fail the whole message.
+    return buttons.flatMap((b) => {
+      if (b.type !== 'FOLLOW_PROFILE') return [b];
+      if (!username) return [];
+      return [{ title: b.title, type: 'WEB_URL' as const, url: `https://www.instagram.com/${encodeURIComponent(username)}/` }];
+    });
+  }
 
   private async renderMergeTags(
     template: string,
@@ -743,10 +810,12 @@ export class AutomationsService {
 
     let rawText = button.unlockedText;
     let media = button.unlockedMedia;
+    let replyButtons = button.unlockedButtons;
     if (button.requireFollow) {
       const isFollowing = await this.instagramService.checkIsFollowing(data.instagramAccountId, data.senderId);
       rawText = isFollowing ? button.unlockedText : button.lockedText;
       media = isFollowing ? button.unlockedMedia : button.lockedMedia;
+      replyButtons = isFollowing ? button.unlockedButtons : button.lockedButtons;
     }
     if (!rawText && !media) {
       return;
@@ -766,7 +835,12 @@ export class AutomationsService {
       recipientId: data.senderId,
       recipientType: 'user',
       actionType: ActionType.SEND_DM,
-      content: { text, media },
+      content: {
+        text,
+        media,
+        // Link buttons only ride on a text reply (validated at write time).
+        buttons: text && replyButtons?.length ? replyButtons.map((b) => ({ title: b.title, type: 'WEB_URL' as const, url: b.url })) : undefined,
+      },
     };
     // Stable jobId keyed off the postback's own message id — a safe no-op
     // in BullMQ if Meta redelivers the same postback (the webhook-controller

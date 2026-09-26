@@ -15,7 +15,7 @@ export function Bezel({
   coreClassName?: string;
 }) {
   return (
-    <div className={cn('rounded-[2rem] border border-white/10 bg-white/[0.03] p-1.5', className)}>
+    <div className={cn('rounded-[2rem] border border-foreground/10 bg-foreground/[0.03] p-1.5', className)}>
       <div
         className={cn(
           'h-full rounded-[calc(2rem-0.375rem)] bg-card shadow-[inset_0_1px_1px_rgba(255,255,255,0.08)]',

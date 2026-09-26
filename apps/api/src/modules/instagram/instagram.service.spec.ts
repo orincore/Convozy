@@ -65,6 +65,21 @@ describe('InstagramService', () => {
     jest.restoreAllMocks();
   });
 
+  describe('createAuthorizationUrl', () => {
+    it('forces the Instagram login screen and ties the state to the workspace', async () => {
+      const redis = { set: jest.fn().mockResolvedValue('OK') } as any;
+      const service = new InstagramService({} as any, makeConfigService(), redis);
+
+      const url = new URL(await service.createAuthorizationUrl('workspace-1'));
+
+      // force_reauth is what lets someone connect a different account than the
+      // one their browser is already logged into.
+      expect(url.searchParams.get('force_reauth')).toBe('true');
+      expect(url.searchParams.get('client_id')).toBe('test-app-id');
+      expect(redis.set).toHaveBeenCalledWith(expect.stringContaining(url.searchParams.get('state') as string), 'workspace-1', 'EX', expect.any(Number));
+    });
+  });
+
   describe('findAccountsNeedingTokenRefresh', () => {
     it('returns ids of active accounts expiring within the refresh window', async () => {
       const prisma = {

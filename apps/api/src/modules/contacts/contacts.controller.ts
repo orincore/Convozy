@@ -1,16 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { AccountId } from '../../common/decorators/account-id.decorator';
+import { AccountScopeGuard } from '../../common/guards/account-scope.guard';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { ContactsService } from './contacts.service';
 import { ListContactsQueryDto } from './dto/list-contacts-query.dto';
 import { SetFieldValueDto } from './dto/set-field-value.dto';
 
 @Controller('contacts')
+@UseGuards(AccountScopeGuard)
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
   @Get()
-  list(@CurrentUser() user: RequestUser, @Query() query: ListContactsQueryDto) {
-    return this.contactsService.listContacts(user.workspaceId, query);
+  list(@CurrentUser() user: RequestUser, @AccountId() accountId: string, @Query() query: ListContactsQueryDto) {
+    return this.contactsService.listContacts(user.workspaceId, accountId, query);
   }
 
   @Get(':id')

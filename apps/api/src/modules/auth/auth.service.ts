@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/configuration';
-import { ConflictAppException } from '../../common/utils/app-exception';
+import { ConflictAppException, NotFoundAppException } from '../../common/utils/app-exception';
+import { hashInviteToken } from '../../common/utils/invite-token.util';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { EntitlementsService } from '../billing/entitlements.service';
 import { RegisterDto } from './dto/register.dto';
@@ -79,6 +80,23 @@ export class AuthService {
     return this.issueTokens(user.id, workspace.id, user.role, user.email);
   }
 
+  /** What an invite link is for, so the accept page can show it. Same generic error for unknown, used and expired. */
+  async previewInvite(token: string): Promise<{ email: string; role: string; workspaceName: string }> {
+    const invite = await this.findOpenInvite(token);
+    return { email: invite.email, role: invite.role, workspaceName: invite.workspace.name };
+  }
+
+  private async findOpenInvite(token: string) {
+    const invite = await this.prisma.workspaceInvite.findUnique({
+      where: { tokenHash: hashInviteToken(token) },
+      include: { workspace: { select: { name: true } } },
+    });
+    if (!invite || invite.acceptedAt || invite.expiresAt <= new Date()) {
+      throw new NotFoundAppException('INVITE_INVALID', 'This invite link is invalid or has expired.');
+    }
+    return invite;
+  }
+
   async login(dto: LoginDto): Promise<AuthTokens> {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user?.passwordHash) {
@@ -112,6 +130,35 @@ export class AuthService {
           data: { googleId: profile.googleId },
         });
       } else {
+        // Someone invited to a workspace joins it (with the invited role) by
+        // signing in with the invited Google email, instead of getting a
+        // workspace of their own.
+        const invite = await this.prisma.workspaceInvite.findFirst({
+          where: { email: profile.email.toLowerCase(), acceptedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (invite) {
+          user = await this.prisma.$transaction(async (tx) => {
+            const claimed = await tx.workspaceInvite.updateMany({
+              where: { id: invite.id, acceptedAt: null },
+              data: { acceptedAt: new Date() },
+            });
+            if (claimed.count === 0) {
+              throw new NotFoundAppException('INVITE_INVALID', 'This invite link is invalid or has expired.');
+            }
+            return tx.user.create({
+              data: {
+                email: profile.email,
+                name: profile.name,
+                googleId: profile.googleId,
+                role: invite.role,
+                workspaceId: invite.workspaceId,
+              },
+            });
+          });
+          this.logger.log(`Google sign-in for ${user.email} joined workspace ${invite.workspaceId} via invite`);
+          return this.issueTokens(user.id, user.workspaceId, user.role, user.email);
+        }
         const workspace = await this.prisma.workspace.create({
           data: { name: `${profile.name}'s Workspace` },
         });

@@ -1,38 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { CircleNotch } from '@phosphor-icons/react';
-import { Button } from '@/components/ui/button';
 import { AutomationForm } from '@/components/automations/automation-form';
-import { ApiError, ConnectedAccount, instagramApi } from '@/lib/api';
+import { useAccounts } from '@/components/dashboard/account-context';
 
 export default function NewAutomationPage() {
-  const [accounts, setAccounts] = useState<ConnectedAccount[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { selected } = useAccounts();
 
-  useEffect(() => {
-    instagramApi.listAccounts().then(setAccounts).catch((err: ApiError) => setError(err.message));
-  }, []);
-
-  if (accounts === null && !error) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <CircleNotch size={24} className="animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <p className="text-sm text-muted-foreground">{error}</p>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/app/automations">Back to automations</Link>
-        </Button>
-      </div>
-    );
-  }
-
-  return <AutomationForm accounts={accounts ?? []} />;
+  // Automations belong to the account selected in the sidebar, so that is the
+  // only account a new one can be created for.
+  return <AutomationForm accounts={selected ? [selected] : []} />;
 }

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { motion, useReducedMotion } from 'motion/react';
 import {
-  CircleNotch,
   WarningCircle,
   LightningSlash,
   PencilSimple,
@@ -17,6 +17,11 @@ import {
 } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { StatusPill, STATUS_PILL } from '@/components/dashboard/status-pill';
+import { AutomationRowSkeleton } from '@/components/dashboard/skeleton';
+import { Bezel } from '@/components/marketing/bezel';
+import { SpotlightCard } from '@/components/marketing/spotlight-card';
+import { CtaButton } from '@/components/marketing/cta-button';
 import { automationsApi, Automation, ApiError } from '@/lib/api';
 
 const ACTION_ICON: Record<Automation['actions'][number]['type'], typeof ChatCircleDots> = {
@@ -29,13 +34,13 @@ const ACTION_ICON: Record<Automation['actions'][number]['type'], typeof ChatCirc
 
 function ActionSummary({ automation }: { automation: Automation }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center -space-x-1.5">
       {automation.actions.map((action) => {
         const Icon = ACTION_ICON[action.type];
         return (
           <span
             key={action.id}
-            className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-muted-foreground ring-2 ring-card"
             title={action.type}
           >
             <Icon size={13} weight="bold" />
@@ -58,16 +63,15 @@ function AutomationRow({
   busy: boolean;
 }) {
   const keywords = automation.triggers.flatMap((t) => t.keywords).slice(0, 3);
+  const draftPill = STATUS_PILL.DRAFT;
 
   return (
-    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{automation.name}</p>
           {automation.status === 'DRAFT' && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[0.6875rem] font-medium text-muted-foreground">
-              Draft
-            </span>
+            <StatusPill label={draftPill.label} tone={draftPill.tone} icon={draftPill.icon} />
           )}
         </div>
         <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -77,7 +81,7 @@ function AutomationRow({
         </p>
       </div>
 
-      <div className="flex items-center gap-5">
+      <div className="flex shrink-0 items-center justify-between gap-5 sm:justify-end">
         <ActionSummary automation={automation} />
         <Switch
           id={`toggle-${automation.id}`}
@@ -86,45 +90,73 @@ function AutomationRow({
           onCheckedChange={(checked) => onToggle(automation.id, checked)}
           disabled={busy}
         />
-        <Link
-          href={`/app/automations/${automation.id}/edit`}
-          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label={`Edit ${automation.name}`}
-        >
-          <PencilSimple size={16} />
-        </Link>
-        <button
-          type="button"
-          onClick={() => onDelete(automation.id)}
-          disabled={busy}
-          className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
-          aria-label={`Delete ${automation.name}`}
-        >
-          <Trash size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <Link
+            href={`/app/automations/${automation.id}/edit`}
+            className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={`Edit ${automation.name}`}
+          >
+            <PencilSimple size={16} />
+          </Link>
+          <button
+            type="button"
+            onClick={() => onDelete(automation.id)}
+            disabled={busy}
+            className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger active:scale-95 disabled:opacity-50"
+            aria-label={`Delete ${automation.name}`}
+          >
+            <Trash size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 function EmptyState() {
+  const reduce = useReducedMotion();
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-card">
-        <LightningSlash size={24} weight="bold" className="text-muted-foreground" />
+    <motion.div
+      className="flex min-h-[55vh] flex-col items-center justify-center gap-6 text-center"
+      initial={reduce ? false : { opacity: 0, y: 16, filter: 'blur(6px)' }}
+      animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="relative flex h-20 w-20 items-center justify-center">
+        <span className="absolute inset-[-1.5rem] rounded-full bg-foreground/[0.06] blur-2xl" aria-hidden />
+        <span className="absolute inset-0 rounded-full border border-foreground/10 bg-card" aria-hidden />
+        <LightningSlash size={28} weight="bold" className="relative text-muted-foreground" />
       </div>
       <div>
-        <h1 className="text-xl font-semibold">No automations yet</h1>
-        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+          No <span className="text-gradient">automations</span> yet
+        </h1>
+        <p className="mx-auto mt-3 max-w-sm text-[0.9375rem] leading-relaxed text-muted-foreground">
           Create a rule that matches a comment keyword and sends a DM automatically.
         </p>
       </div>
-      <Button asChild>
-        <Link href="/app/automations/new">
-          <Plus size={16} weight="bold" />
-          Create automation
-        </Link>
-      </Button>
+      <CtaButton href="/app/automations/new">
+        <Plus size={16} weight="bold" />
+        Create automation
+      </CtaButton>
+    </motion.div>
+  );
+}
+
+function AutomationsSkeleton() {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <span className="block h-7 w-40 animate-pulse rounded-[var(--radius-control)] bg-muted motion-reduce:animate-none" />
+        <span className="block h-9 w-32 animate-pulse rounded-[var(--radius-control)] bg-muted motion-reduce:animate-none" />
+      </div>
+      <div className="mt-6 flex flex-col gap-3">
+        {[0, 1, 2].map((i) => (
+          <Bezel key={i} className="rounded-[1.5rem]" coreClassName="rounded-[calc(1.5rem-0.375rem)]">
+            <AutomationRowSkeleton />
+          </Bezel>
+        ))}
+      </div>
     </div>
   );
 }
@@ -133,6 +165,7 @@ export default function AutomationsPage() {
   const [automations, setAutomations] = useState<Automation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const reduce = useReducedMotion();
 
   function load() {
     automationsApi
@@ -174,11 +207,7 @@ export default function AutomationsPage() {
   }
 
   if (automations === null && !error) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <CircleNotch size={24} className="animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <AutomationsSkeleton />;
   }
 
   if (error && automations === null) {
@@ -199,8 +228,10 @@ export default function AutomationsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Automations</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+          <span className="text-gradient">Automations</span>
+        </h1>
         <Button asChild size="sm">
           <Link href="/app/automations/new">
             <Plus size={14} weight="bold" />
@@ -216,15 +247,25 @@ export default function AutomationsPage() {
         </div>
       )}
 
-      <div className="mt-6 flex flex-col divide-y divide-border rounded-[var(--radius-card)] border border-border bg-card">
-        {automations?.map((automation) => (
-          <AutomationRow
+      <div className="mt-6 flex flex-col gap-3">
+        {automations?.map((automation, i) => (
+          <motion.div
             key={automation.id}
-            automation={automation}
-            onToggle={handleToggle}
-            onDelete={handleDelete}
-            busy={busyId === automation.id}
-          />
+            initial={reduce ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <SpotlightCard className="rounded-[1.5rem]">
+              <Bezel className="rounded-[1.5rem]" coreClassName="rounded-[calc(1.5rem-0.375rem)]">
+                <AutomationRow
+                  automation={automation}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  busy={busyId === automation.id}
+                />
+              </Bezel>
+            </SpotlightCard>
+          </motion.div>
         ))}
       </div>
     </div>

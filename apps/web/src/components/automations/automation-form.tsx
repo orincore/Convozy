@@ -4,11 +4,16 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowLeft, CheckCircle, CircleNotch, ImageSquare, MagicWand, Plus, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react';
+import { ArrowLeft, CaretRight, CheckCircle, CircleNotch, ImageSquare, MagicWand, PencilSimple, Plus, Trash, WarningCircle, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { TemplateDialog } from '@/components/automations/template-dialog';
+import { PhonePreview } from '@/components/automations/phone-preview';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
   ActionStepEditor,
   ActionStepNode,
@@ -48,7 +53,20 @@ const TRIGGER_SOURCES: { value: TriggerSource; label: string }[] = [
   { value: 'COMMENT', label: 'Comment' },
   { value: 'LIVE_COMMENT', label: 'Live comment' },
   { value: 'STORY_REPLY', label: 'Story reply' },
+  { value: 'STORY_MENTION', label: 'Story mention' },
+  { value: 'DM', label: 'Direct message' },
+  { value: 'REFERRAL', label: 'ig.me link or ad click' },
 ];
+
+// What the keyword field means for each source. Story mentions carry no text,
+// so there is nothing to match on; referrals match the link's ?ref= value.
+const SOURCE_KEYWORD_HINT: Partial<Record<TriggerSource, string>> = {
+  STORY_MENTION: 'Someone mentions your account in their story. There is no text to match, so every mention triggers this.',
+  REFERRAL: 'Matched against the ref value of your ig.me link (ig.me/yourname?ref=VALUE). Leave blank to match every link or ad click.',
+  DM: 'Matched against the text of the message. A given person gets this automation at most once every 24 hours.',
+};
+
+const CONVERSATION_ONLY_SOURCES: TriggerSource[] = ['DM', 'STORY_REPLY', 'STORY_MENTION', 'REFERRAL'];
 
 const MATCH_TYPES: { value: TriggerMatchType; label: string; hint: string }[] = [
   { value: 'CONTAINS', label: 'Contains', hint: 'Matches if the message includes any keyword — leave blank to match every comment' },
@@ -74,75 +92,9 @@ const SOURCE_LABELS: Record<TriggerSource, string> = {
   DM: 'DM',
   STORY_REPLY: 'Story reply',
   LIVE_COMMENT: 'Live comment',
+  STORY_MENTION: 'Story mention',
+  REFERRAL: 'ig.me link / ad',
 };
-
-function TemplatePicker({
-  templates,
-  error,
-  onUse,
-}: {
-  templates: AutomationTemplate[] | null;
-  error: string | null;
-  onUse: (template: AutomationTemplate) => void;
-}) {
-  if (error) {
-    // Non-fatal: the blank-form builder below still works fully without
-    // templates, so a fetch failure here is shown but never blocks the page.
-    return (
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <WarningCircle size={13} />
-        Couldn&apos;t load templates ({error}) — you can still build from scratch below.
-      </p>
-    );
-  }
-
-  if (templates === null) {
-    return (
-      <div className="flex gap-3 overflow-x-auto pb-1">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className="h-[122px] w-64 shrink-0 animate-pulse rounded-[var(--radius-card)] border border-border bg-card"
-          />
-        ))}
-      </div>
-    );
-  }
-
-  if (templates.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {templates.map((template) => {
-        const sources = Array.from(new Set(template.triggers.map((t) => t.source)));
-        return (
-          <div
-            key={template.id}
-            className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-card p-4"
-          >
-            <div className="flex flex-wrap gap-1.5">
-              {sources.map((source) => (
-                <Badge key={source} variant="outline">
-                  {SOURCE_LABELS[source]}
-                </Badge>
-              ))}
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">{template.name}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
-            </div>
-            <Button type="button" variant="outline" size="sm" className="mt-auto" onClick={() => onUse(template)}>
-              <Sparkle size={13} />
-              Use this template
-            </Button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function MediaThumb({
   item,
@@ -228,34 +180,28 @@ function PostPicker({
         <p className="mt-1 text-xs text-muted-foreground">Choose which posts this automation watches.</p>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-control)] border border-border p-3 has-[:checked]:border-accent">
-          <input
-            type="radio"
-            name="scope"
-            checked={scopeType === 'ALL_POSTS'}
-            onChange={() => onScopeTypeChange('ALL_POSTS')}
-            className="mt-0.5 accent-accent"
-          />
-          <span>
-            <span className="block text-sm text-foreground">All posts</span>
-            <span className="block text-xs text-muted-foreground">Watch every post and reel on this account</span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-[var(--radius-control)] border border-border p-3 has-[:checked]:border-accent">
-          <input
-            type="radio"
-            name="scope"
-            checked={scopeType === 'SPECIFIC_POSTS'}
-            onChange={() => onScopeTypeChange('SPECIFIC_POSTS')}
-            className="mt-0.5 accent-accent"
-          />
-          <span>
-            <span className="block text-sm text-foreground">Specific posts</span>
-            <span className="block text-xs text-muted-foreground">Pick which posts this rule watches</span>
-          </span>
-        </label>
-      </div>
+      <RadioGroup
+        value={scopeType}
+        onValueChange={(v) => onScopeTypeChange(v as AutomationScopeType)}
+        className="gap-2"
+      >
+        {[
+          { value: 'ALL_POSTS', title: 'All posts', hint: 'Watch every post and reel on this account' },
+          { value: 'SPECIFIC_POSTS', title: 'Specific posts', hint: 'Pick which posts this rule watches' },
+        ].map((opt) => (
+          <label
+            key={opt.value}
+            htmlFor={`scope-${opt.value}`}
+            className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border border-border p-3 transition-colors has-[[data-state=checked]]:border-accent has-[[data-state=checked]]:bg-muted"
+          >
+            <RadioGroupItem id={`scope-${opt.value}`} value={opt.value} className="mt-0.5" />
+            <span>
+              <span className="block text-sm text-foreground">{opt.title}</span>
+              <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
 
       {scopeType === 'SPECIFIC_POSTS' && (
         <div>
@@ -297,6 +243,13 @@ function PostPicker({
   );
 }
 
+const STEP_LABELS: Record<string, string> = {
+  SEND_DM: 'Send message',
+  REPLY_COMMENT: 'Reply to comment',
+  HIDE_COMMENT: 'Hide comment',
+  CONDITION: 'If / else',
+};
+
 interface AutomationFormProps {
   accounts: ConnectedAccount[];
   /** Present = edit an existing automation; absent = create a new one. */
@@ -317,6 +270,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   );
   const [scopeType, setScopeType] = useState<AutomationScopeType>(automation?.scopeType ?? 'ALL_POSTS');
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>(automation?.scopeMediaIds ?? []);
+  const [templatesOpen, setTemplatesOpen] = useState(!isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templates, setTemplates] = useState<AutomationTemplate[] | null>(null);
@@ -360,6 +314,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     setScopeType('ALL_POSTS');
     setSelectedMediaIds([]);
     setAppliedTemplateName(template.name);
+    setTemplatesOpen(false);
     setError(null);
   }
 
@@ -406,10 +361,9 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     }
     if (
       scopeType === 'SPECIFIC_POSTS' &&
-      triggers.some((t) => t.source === 'STORY_REPLY') &&
-      triggers.length === triggers.filter((t) => t.source === 'STORY_REPLY').length
+      triggers.every((t) => CONVERSATION_ONLY_SOURCES.includes(t.source))
     ) {
-      setError('Story replies aren’t tied to a specific post — switch to "All posts" or add a comment trigger too.');
+      setError('DMs, story replies, story mentions and link clicks aren’t tied to a specific post. Switch to "All posts" or add a comment trigger too.');
       return;
     }
 
@@ -462,238 +416,283 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     );
   }
 
+  const account = accounts.find((acc) => acc.id === accountId);
+  function addTopLevelStep(type: 'SEND_DM' | 'CONDITION') {
+    const node = emptyActionStep(type);
+    setActionSteps((c) => addActionStep(c, null, null, node));
+  }
+
   return (
-    <div className="mx-auto max-w-5xl">
-      <Link href="/app/automations" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft size={14} />
-        Automations
-      </Link>
+    <div className="mx-auto max-w-[1400px]">
+      <TemplateDialog
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        templates={templates}
+        error={templatesError}
+        onUse={applyTemplate}
+      />
 
-      <h1 className="mt-4 text-xl font-semibold">{isEdit ? 'Edit automation' : 'New automation'}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Comment or reply to a story with a keyword, get a reply automatically.
-      </p>
-
-      {!isEdit && (
-        <section className="mt-8 flex flex-col gap-4">
-          {appliedTemplateName ? (
-            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-border bg-card px-4 py-3 text-sm">
-              <span className="flex items-center gap-2 text-foreground">
-                <MagicWand size={15} />
-                Prefilled from &ldquo;{appliedTemplateName}&rdquo; - review and edit before creating.
-              </span>
-              <button
-                type="button"
-                onClick={clearTemplate}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <X size={12} />
-                Clear
-              </button>
-            </div>
-          ) : (
-            <>
-              <h2 className="text-sm font-semibold text-foreground">Start from a template</h2>
-              <TemplatePicker templates={templates} error={templatesError} onUse={applyTemplate} />
-            </>
-          )}
-        </section>
-      )}
-
-      <form onSubmit={handleSubmit} className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[1fr_320px] lg:items-start">
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="name">Name</Label>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm">
+            <Link href="/app/automations" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
+              <ArrowLeft size={14} />
+              Automations
+            </Link>
+            <CaretRight size={12} className="text-muted-foreground" aria-hidden />
+            <label htmlFor="name" className="sr-only">
+              Automation name
+            </label>
+            <div className="relative flex min-w-0 items-center">
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Send the price list"
+                placeholder="Untitled"
+                className="h-9 w-56 border-transparent bg-transparent pr-8 font-medium hover:border-border sm:w-72"
               />
+              <PencilSimple size={14} className="pointer-events-none absolute right-2.5 text-muted-foreground" />
             </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="account">Instagram account</Label>
-              <select
-                id="account"
-                value={accountId}
-                disabled={isEdit}
-                onChange={(e) => {
-                  setAccountId(e.target.value);
-                  setSelectedMediaIds([]);
-                }}
-                className="h-10 w-full rounded-[var(--radius-control)] border border-border bg-card px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    @{account.igUsername}
-                  </option>
-                ))}
-              </select>
-              {isEdit && (
-                <p className="text-xs text-muted-foreground">
-                  Can&apos;t be changed after creation — disconnect and recreate to move it to another account.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <section className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground">When this happens</h2>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setTriggers((current) => [...current, emptyTrigger()])}
-              >
-                <Plus size={14} />
-                Add trigger
+            {!isEdit && <Badge>Draft</Badge>}
+          </nav>
+          <div className="flex items-center gap-2">
+            {!isEdit && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setTemplatesOpen(true)}>
+                <MagicWand size={14} />
+                Templates
               </Button>
-            </div>
-
-            {triggers.map((trigger, index) => (
-              <div key={index} className="flex flex-col gap-3 rounded-[var(--radius-card)] border border-border bg-card p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="grid flex-1 grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`source-${index}`} className="text-xs text-muted-foreground">
-                        Source
-                      </Label>
-                      <select
-                        id={`source-${index}`}
-                        value={trigger.source}
-                        onChange={(e) => updateTrigger(index, { source: e.target.value as TriggerSource })}
-                        className="h-9 rounded-[var(--radius-control)] border border-border bg-background px-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-                      >
-                        {TRIGGER_SOURCES.map((s) => (
-                          <option key={s.value} value={s.value}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`match-${index}`} className="text-xs text-muted-foreground">
-                        Match type
-                      </Label>
-                      <select
-                        id={`match-${index}`}
-                        value={trigger.matchType}
-                        onChange={(e) => updateTrigger(index, { matchType: e.target.value as TriggerMatchType })}
-                        className="h-9 rounded-[var(--radius-control)] border border-border bg-background px-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-                      >
-                        {MATCH_TYPES.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                  {triggers.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setTriggers((current) => current.filter((_, i) => i !== index))}
-                      className="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
-                      aria-label="Remove trigger"
-                    >
-                      <Trash size={14} />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor={`keywords-${index}`} className="text-xs text-muted-foreground">
-                    Keywords (comma separated)
-                  </Label>
-                  <Input
-                    id={`keywords-${index}`}
-                    value={trigger.keywords}
-                    onChange={(e) => updateTrigger(index, { keywords: e.target.value })}
-                    placeholder="price, pricing, cost"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {MATCH_TYPES.find((m) => m.value === trigger.matchType)?.hint}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </section>
-
-          <section className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-foreground">Then do this</h2>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setActionSteps((current) => addActionStep(current, null, null, emptyActionStep('SEND_DM')))}
-                >
-                  <Plus size={14} />
-                  Add action
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setActionSteps((current) => addActionStep(current, null, null, emptyActionStep('CONDITION')))
-                  }
-                >
-                  <Plus size={14} />
-                  Add condition
-                </Button>
-              </div>
-            </div>
-
-            <ActionStepEditor
-              nodes={actionSteps}
-              depth={1}
-              minItems={1}
-              parentId={null}
-              branch={null}
-              storyReplyWarning={includesStoryReply}
-              customFields={customFields}
-              onUpdate={(id, patch) => setActionSteps((current) => updateActionStep(current, id, patch))}
-              onRemove={(id) => setActionSteps((current) => removeActionStep(current, id))}
-              onAdd={(parentId, branch, type) =>
-                setActionSteps((current) => addActionStep(current, parentId, branch, emptyActionStep(type)))
-              }
-            />
-          </section>
-
-          {error && (
-            <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-              <WarningCircle size={16} weight="bold" />
-              {error}
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
+            )}
+            <Button type="button" variant="outline" asChild>
+              <Link href="/app/automations">Cancel</Link>
+            </Button>
             <Button type="submit" disabled={submitting}>
               {submitting && <CircleNotch size={16} className="animate-spin" />}
               {isEdit ? 'Save changes' : 'Create automation'}
             </Button>
-            <Button type="button" variant="outline" asChild>
-              <Link href="/app/automations">Cancel</Link>
-            </Button>
           </div>
-        </div>
+        </header>
 
-        <div className="lg:sticky lg:top-24">
-          <PostPicker
-            accountId={accountId}
-            scopeType={scopeType}
-            onScopeTypeChange={(scope) => {
-              setScopeType(scope);
-              if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
-            }}
-            selectedMediaIds={selectedMediaIds}
-            onToggleMedia={toggleMedia}
-          />
+        {appliedTemplateName && (
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-border bg-card px-4 py-2.5 text-sm">
+            <span className="flex items-center gap-2 text-foreground">
+              <MagicWand size={15} />
+              Prefilled from &ldquo;{appliedTemplateName}&rdquo;. Review and edit before creating.
+            </span>
+            <button
+              type="button"
+              onClick={clearTemplate}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X size={12} />
+              Clear
+            </button>
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 rounded-[var(--radius-control)] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+          >
+            <WarningCircle size={16} weight="bold" />
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 overflow-hidden rounded-[var(--radius-card)] border border-border xl:grid-cols-[minmax(0,1fr)_380px]">
+          <section aria-label="Send message" className="min-w-0 bg-card xl:border-r xl:border-border">
+            <div className="flex items-center justify-center border-b border-border bg-muted px-6 py-4">
+              <h2 className="text-xl font-semibold tracking-tight text-foreground">Send message</h2>
+            </div>
+
+            <div className="mx-auto flex w-full max-w-[680px] flex-col gap-6 p-5 sm:p-6">
+              <section aria-label="Trigger" className="flex flex-col gap-4">
+                <h3 className="text-sm font-semibold text-foreground">Trigger</h3>
+                  <div className="flex flex-col gap-2">
+                  <Label htmlFor="account">Instagram account</Label>
+                  <Select
+                    id="account"
+                    value={accountId}
+                    disabled={isEdit || accounts.length === 1}
+                    className="h-10 w-full"
+                    onChange={(e) => {
+                      setAccountId(e.target.value);
+                      setSelectedMediaIds([]);
+                    }}
+                  >
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        @{a.igUsername}
+                      </option>
+                    ))}
+                  </Select>
+                  {isEdit && (
+                    <p className="text-xs text-muted-foreground">
+                      The account can&apos;t be changed after creation. Disconnect and recreate to move it.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">Any one of these triggers starts the automation.</p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setTriggers((c) => [...c, emptyTrigger()])}>
+                    <Plus size={14} />
+                    Add trigger
+                  </Button>
+                </div>
+
+                {triggers.map((trigger, index) => (
+                  <div key={index} className="rounded-[var(--radius-control)] border border-dashed border-border p-4">
+                    <div className={`grid grid-cols-1 gap-4 sm:items-end ${triggers.length > 1 ? 'sm:grid-cols-[1fr_1fr_auto]' : 'sm:grid-cols-2'}`}>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor={`source-${index}`} className="text-xs text-muted-foreground">
+                          Source
+                        </Label>
+                        <Select
+                          id={`source-${index}`}
+                          value={trigger.source}
+                          className="h-10 w-full"
+                          onChange={(e) => updateTrigger(index, { source: e.target.value as TriggerSource })}
+                        >
+                          {TRIGGER_SOURCES.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor={`match-${index}`} className="text-xs text-muted-foreground">
+                          Match type
+                        </Label>
+                        <Select
+                          id={`match-${index}`}
+                          value={trigger.matchType}
+                          className="h-10 w-full"
+                          onChange={(e) => updateTrigger(index, { matchType: e.target.value as TriggerMatchType })}
+                        >
+                          {MATCH_TYPES.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      {triggers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setTriggers((c) => c.filter((_, i) => i !== index))}
+                          className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
+                          aria-label="Remove trigger"
+                        >
+                          <Trash size={15} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-col gap-2">
+                      <Label htmlFor={`keywords-${index}`} className="text-xs text-muted-foreground">
+                        Keywords, comma separated
+                      </Label>
+                      <Input
+                        id={`keywords-${index}`}
+                        value={trigger.keywords}
+                        onChange={(e) => updateTrigger(index, { keywords: e.target.value })}
+                        placeholder="price, pricing, cost"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {SOURCE_KEYWORD_HINT[trigger.source] ?? MATCH_TYPES.find((m) => m.value === trigger.matchType)?.hint}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </section>
+
+              <Separator />
+
+              <section aria-label="Message steps" className="flex flex-col gap-5">
+                <h3 className="text-sm font-semibold text-foreground">Message</h3>
+                {actionSteps.map((node, i) => (
+                  <div key={node.id} className="flex flex-col gap-4">
+                    {(actionSteps.length > 1 || node.type === 'CONDITION') && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Step {i + 1}: {STEP_LABELS[node.type]}
+                        </p>
+                        {actionSteps.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setActionSteps((c) => removeActionStep(c, node.id))}
+                            className="flex items-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-danger"
+                          >
+                            <Trash size={14} />
+                            Delete step
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <ActionStepEditor
+                      nodes={[node]}
+                      bare
+                      depth={1}
+                      minItems={1}
+                      parentId={null}
+                      branch={null}
+                      storyReplyWarning={includesStoryReply}
+                      customFields={customFields}
+                      onUpdate={(id, patch) => setActionSteps((c) => updateActionStep(c, id, patch))}
+                      onRemove={(id) => setActionSteps((c) => removeActionStep(c, id))}
+                      onAdd={(parentId, branch, type) =>
+                        setActionSteps((c) => addActionStep(c, parentId, branch, emptyActionStep(type)))
+                      }
+                    />
+                    {i < actionSteps.length - 1 && <Separator />}
+                  </div>
+                ))}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => addTopLevelStep('SEND_DM')}
+                    className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+                  >
+                    <Plus size={14} />
+                    Add another message
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addTopLevelStep('CONDITION')}
+                    className="flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-3 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
+                  >
+                    <Plus size={14} />
+                    Add if / else
+                  </button>
+                </div>
+              </section>
+
+              <Separator />
+
+              <section aria-label="Applies to">
+                <PostPicker
+                  accountId={accountId}
+                  scopeType={scopeType}
+                  onScopeTypeChange={(scope) => {
+                    setScopeType(scope);
+                    if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
+                  }}
+                  selectedMediaIds={selectedMediaIds}
+                  onToggleMedia={toggleMedia}
+                />
+              </section>
+            </div>
+          </section>
+
+          <aside aria-label="Message preview" className="border-t border-border bg-background p-4 xl:border-t-0">
+            <PhonePreview
+              accountName={account ? `@${account.igUsername}` : ''}
+              displayName={account?.displayName}
+              profilePictureUrl={account?.profilePictureUrl}
+              steps={actionSteps}
+            />
+          </aside>
         </div>
       </form>
     </div>

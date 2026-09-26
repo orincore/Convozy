@@ -38,24 +38,33 @@ export class InstagramController {
     const appBaseUrl = this.configService.get('appBaseUrl', { infer: true });
 
     if (error) {
-      res.redirect(
-        `${appBaseUrl}/app?instagram_error=${encodeURIComponent(errorDescription ?? error)}`,
-      );
+      res.redirect(this.resultUrl(appBaseUrl, 'error', errorDescription ?? error));
       return;
     }
 
     if (!code || !state) {
-      res.redirect(`${appBaseUrl}/app?instagram_error=${encodeURIComponent('Missing code or state')}`);
+      res.redirect(this.resultUrl(appBaseUrl, 'error', 'Missing code or state'));
       return;
     }
 
     try {
       await this.instagramService.handleCallback(code, state);
-      res.redirect(`${appBaseUrl}/app?instagram=connected`);
+      res.redirect(this.resultUrl(appBaseUrl, 'connected'));
     } catch (err) {
       const message = err instanceof AppException ? (err.getResponse() as { message: string }).message : 'Could not connect your Instagram account.';
-      res.redirect(`${appBaseUrl}/app?instagram_error=${encodeURIComponent(message)}`);
+      res.redirect(this.resultUrl(appBaseUrl, 'error', message));
     }
+  }
+
+  /**
+   * The connect flow runs in a popup, which lands on this page: it tells the
+   * dashboard window the outcome and closes itself (or, without an opener,
+   * sends the person to the accounts page).
+   */
+  private resultUrl(appBaseUrl: string, status: 'connected' | 'error', message?: string): string {
+    const params = new URLSearchParams({ status });
+    if (message) params.set('message', message);
+    return `${appBaseUrl}/app/instagram/callback?${params.toString()}`;
   }
 
   @Get('accounts')
