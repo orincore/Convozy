@@ -1891,7 +1891,7 @@ describe('AutomationsService drafts', () => {
     prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'd1', workspaceId: 'workspace-1', status: AutomationStatus.DRAFT, triggers: [], actions: [] });
     const tx = {
       trigger: { deleteMany: jest.fn() },
-      action: { deleteMany: jest.fn(), create: jest.fn().mockResolvedValue({ id: 'act-1' }) },
+      action: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), create: jest.fn().mockResolvedValue({ id: 'act-1' }) },
       automation: { update: jest.fn() },
     };
     prisma.$transaction = jest.fn().mockImplementation((fn: any) => fn(tx));
@@ -1921,5 +1921,67 @@ describe('AutomationsService merge tag text cleanup', () => {
     });
 
     expect(rendered).toBe('Heyy Adarsh Suradkar replied in dm');
+  });
+});
+
+
+describe('AutomationsService.update keeps action ids stable', () => {
+  const button = { title: 'Get it', type: 'POSTBACK', requireFollow: false, unlockedText: 'here' };
+
+  function setupUpdate(oldRows: any[]) {
+    const { service, prisma } = makeService();
+    prisma.automation.findUnique = jest.fn().mockResolvedValue({ id: 'a1', workspaceId: 'workspace-1', status: AutomationStatus.ACTIVE, triggers: [], actions: [] });
+    const created: any[] = [];
+    const tx = {
+      trigger: { deleteMany: jest.fn() },
+      action: {
+        findMany: jest.fn().mockResolvedValue(oldRows),
+        deleteMany: jest.fn(),
+        create: jest.fn().mockImplementation(({ data }: any) => {
+          const row = { ...data, id: data.id ?? `new-${created.length}` };
+          created.push(row);
+          return Promise.resolve(row);
+        }),
+        update: jest.fn(),
+      },
+      automation: { update: jest.fn() },
+    };
+    prisma.$transaction = jest.fn().mockImplementation((fn: any) => fn(tx));
+    return { service, tx, created };
+  }
+
+  it('re-creates an edited action with its old id, so buttons already sent still resolve', async () => {
+    const { service, tx, created } = setupUpdate([
+      { id: 'old-1', type: ActionType.SEND_DM, parentActionId: null, branch: null, order: 0, createdAt: new Date(1) },
+    ]);
+
+    await service.update('workspace-1', 'a1', {
+      actions: [{ type: ActionType.SEND_DM, order: 0, payload: { text: 'hi', buttons: [button] } }],
+    } as any);
+
+    expect(created[0].id).toBe('old-1');
+    // The button's payload is rebuilt from that same id.
+    expect(tx.action.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { payload: expect.objectContaining({ buttons: [expect.objectContaining({ payload: 'old-1:0' })] }) } }),
+    );
+  });
+
+  it('matches by position and type, and gives brand-new actions fresh ids', async () => {
+    const { service, created } = setupUpdate([
+      { id: 'old-1', type: ActionType.SEND_DM, parentActionId: null, branch: null, order: 0, createdAt: new Date(1) },
+      { id: 'old-2', type: ActionType.REPLY_COMMENT, parentActionId: null, branch: null, order: 1, createdAt: new Date(2) },
+    ]);
+
+    await service.update('workspace-1', 'a1', {
+      actions: [
+        { type: ActionType.SEND_DM, order: 0, payload: { text: 'a' } },
+        { type: ActionType.SEND_DM, order: 1, payload: { text: 'b' } }, // type differs from old position 2
+        { type: ActionType.SEND_DM, order: 2, payload: { text: 'c' } }, // no old action at this position
+      ],
+    } as any);
+
+    expect(created[0].id).toBe('old-1');
+    expect(created[1].id).toBe('new-1');
+    expect(created[2].id).toBe('new-2');
   });
 });

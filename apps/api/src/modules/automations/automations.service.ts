@@ -237,6 +237,8 @@ export class AutomationsService {
       if (dto.triggers) {
         await tx.trigger.deleteMany({ where: { automationId: id } });
       }
+      // Read before deleting: the new tree reuses these ids (see createActionTree).
+      const idPool = dto.actions ? await this.collectActionIdPool(tx, id) : [];
       if (dto.actions) {
         // Root-level actions only — cascades to every descendant (children,
         // condition) via the schema's onDelete: Cascade self-relation.
@@ -258,7 +260,7 @@ export class AutomationsService {
       });
 
       if (dto.actions) {
-        await this.createActionTree(tx, id, null, null, dto.actions);
+        await this.createActionTree(tx, id, null, null, dto.actions, { pool: idPool, cursor: 0 });
       }
     });
 
@@ -301,16 +303,55 @@ export class AutomationsService {
    * for why the self-referential `children` relation can't be combined with
    * Prisma auto-populating the unrelated `automationId` FK on nested rows.
    */
+  /**
+   * The automation's current action ids in creation order (depth-first: an
+   * action, then its THEN branch, then its ELSE branch). Used to keep ids stable
+   * across an edit, see createActionTree's `reuse`.
+   */
+  private async collectActionIdPool(tx: Prisma.TransactionClient, automationId: string): Promise<{ id: string; type: ActionType }[]> {
+    const rows = await tx.action.findMany({
+      where: { automationId },
+      select: { id: true, type: true, parentActionId: true, branch: true, order: true, createdAt: true },
+    });
+    const byParent = new Map<string | null, typeof rows>();
+    for (const row of rows) {
+      const list = byParent.get(row.parentActionId) ?? [];
+      list.push(row);
+      byParent.set(row.parentActionId, list);
+    }
+    const sorted = (list: typeof rows) => [...list].sort((a, b) => a.order - b.order || a.createdAt.getTime() - b.createdAt.getTime());
+    const out: { id: string; type: ActionType }[] = [];
+    const visit = (row: (typeof rows)[number]) => {
+      out.push({ id: row.id, type: row.type });
+      // THEN before ELSE, matching the order createActionTree inserts them.
+      for (const branch of [ActionBranch.THEN, ActionBranch.ELSE]) {
+        for (const child of sorted((byParent.get(row.id) ?? []).filter((c) => c.branch === branch))) visit(child);
+      }
+    };
+    for (const root of sorted(byParent.get(null) ?? [])) visit(root);
+    return out;
+  }
+
+  /**
+   * `reuse`: when an edit replaces the tree, each new action takes the id of the
+   * old action at the same position (same type). A POSTBACK button already sent
+   * to people carries `${actionId}:${buttonIndex}`, so keeping the id means those
+   * buttons keep working after the automation is edited.
+   */
   private async createActionTree(
     tx: Prisma.TransactionClient,
     automationId: string,
     parentActionId: string | null,
     branch: ActionBranch | null,
     actions: ActionDto[],
+    reuse?: { pool: { id: string; type: ActionType }[]; cursor: number },
   ): Promise<void> {
     for (const dto of actions) {
+      const candidate = reuse ? reuse.pool[reuse.cursor++] : undefined;
       const action = await tx.action.create({
         data: {
+          // Only set when reusing an old id; otherwise the database generates one.
+          ...(candidate && candidate.type === dto.type ? { id: candidate.id } : {}),
           automationId,
           parentActionId,
           branch: branch ?? undefined,
@@ -339,8 +380,8 @@ export class AutomationsService {
       }
 
       if (dto.children) {
-        await this.createActionTree(tx, automationId, action.id, ActionBranch.THEN, dto.children.then);
-        await this.createActionTree(tx, automationId, action.id, ActionBranch.ELSE, dto.children.else);
+        await this.createActionTree(tx, automationId, action.id, ActionBranch.THEN, dto.children.then, reuse);
+        await this.createActionTree(tx, automationId, action.id, ActionBranch.ELSE, dto.children.else, reuse);
       }
     }
   }

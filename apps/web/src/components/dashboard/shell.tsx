@@ -265,7 +265,9 @@ function ShellInner({ children }: { children: ReactNode }) {
       <div className="relative z-10 flex min-h-[100dvh]">
       <aside
         className={cn(
-          'hidden shrink-0 border-r border-border transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] sm:block',
+          // Pinned to the viewport (not the page), so the sidebar is the same height on
+          // every page and its items never move as the content grows or scrolls.
+          'sticky top-0 hidden h-[100dvh] shrink-0 self-start border-r border-border transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] sm:block',
           collapsed ? 'w-[76px]' : 'w-60',
         )}
       >
