@@ -615,8 +615,31 @@ export const ticketsApi = {
   addNote: (id: string, text: string) =>
     authFetch<TicketMessage>(`/tickets/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) }),
   getSettings: () => authFetch<TicketSettings>('/tickets/settings'),
-  updateSettings: (input: Partial<TicketSettings>) =>
-    authFetch<TicketSettings>('/tickets/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  // Only the editable fields are sent: the API rejects unknown properties, and
+  // the record it returns also carries id, workspaceId, instagramAccountId and updatedAt.
+  updateSettings: (input: Partial<TicketSettings>) => {
+    const {
+      enabled,
+      keywords,
+      createFromMentions,
+      createFromAllDms,
+      createFromStoryMentions,
+      createFromReferrals,
+      createFromTaggedPosts,
+    } = input;
+    return authFetch<TicketSettings>('/tickets/settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled,
+        keywords,
+        createFromMentions,
+        createFromAllDms,
+        createFromStoryMentions,
+        createFromReferrals,
+        createFromTaggedPosts,
+      }),
+    });
+  },
 };
 
 // ── Team ──────────────────────────────────────────────────────────────────
