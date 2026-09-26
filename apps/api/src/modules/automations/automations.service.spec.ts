@@ -959,6 +959,43 @@ describe('AutomationsService.resolvePostback', () => {
     );
   });
 
+  it('turns a Follow me reply button into a link to the account profile', async () => {
+    const { service, prisma, instagramService, messageSendQueue } = makeService();
+    prisma.action.findUnique.mockResolvedValue(
+      makeAction({
+        payload: {
+          text: 'pick one',
+          buttons: [
+            {
+              title: 'Get the link',
+              type: 'POSTBACK',
+              payload: 'action-1:0',
+              requireFollow: true,
+              unlockedText: 'Here you go',
+              lockedText: 'Follow me first, then tap again',
+              lockedButtons: [{ title: 'Follow me', type: 'FOLLOW_PROFILE' }],
+            },
+          ],
+        },
+      }),
+    );
+    // Not following, so the locked reply (with the Follow me button) is sent.
+    instagramService.checkIsFollowing = jest.fn().mockResolvedValue(false);
+
+    await service.resolvePostback({ instagramAccountId: 'ig-account-1', senderId: 'ig-scoped-user-1', payload: 'action-1:0', mid: 'mid-7' });
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        content: expect.objectContaining({
+          text: 'Follow me first, then tap again',
+          buttons: [{ title: 'Follow me', type: 'WEB_URL', url: 'https://www.instagram.com/creator_handle/' }],
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('sends the unlocked message when gated and the tapper is following', async () => {
     const { service, prisma, instagramService, messageSendQueue } = makeService();
     prisma.action.findUnique.mockResolvedValue(

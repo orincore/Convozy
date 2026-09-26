@@ -39,6 +39,10 @@ export interface PreviewMessage {
   text: string;
   buttons: string[];
   media?: { type: MediaKind; filename: string } | null;
+  /** 'user' is the person tapping or replying (right side); default is the business. */
+  from?: 'business' | 'user';
+  /** A button label shown as being pressed right now. */
+  activeButton?: string;
 }
 
 /** The DM bubbles a list of steps would send, with merge tags shown as sample values. */
@@ -124,6 +128,19 @@ export function PhonePreview({ accountName, displayName, profilePictureUrl, step
           {messages.map((m, i) => {
             const Icon = m.media ? MEDIA_ICON[m.media.type] : null;
             const isLast = i === messages.length - 1 && !typing;
+            if (m.from === 'user') {
+              return (
+                <motion.div
+                  key={m.id}
+                  initial={reduce ? false : { opacity: 0, y: 10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  className="flex justify-end"
+                >
+                  <p className="max-w-[78%] rounded-[1.375rem] bg-accent px-3.5 py-2.5 text-sm leading-snug text-accent-foreground">{m.text}</p>
+                </motion.div>
+              );
+            }
             return (
               <motion.div
                 key={m.id}
@@ -145,9 +162,16 @@ export function PhonePreview({ accountName, displayName, profilePictureUrl, step
                     </p>
                   )}
                   {m.buttons.map((b, bi) => (
-                    <span key={bi} className="border-t border-background/60 px-3.5 py-2 text-center text-sm font-medium">
+                    <motion.span
+                      key={bi}
+                      animate={m.activeButton === b ? { scale: [1, 0.96, 1] } : { scale: 1 }}
+                      transition={{ duration: 0.4 }}
+                      className={`border-t border-background/60 px-3.5 py-2 text-center text-sm font-medium transition-colors ${
+                        m.activeButton === b ? 'bg-foreground/20' : ''
+                      }`}
+                    >
                       {b}
-                    </span>
+                    </motion.span>
                   ))}
                 </div>
               </motion.div>

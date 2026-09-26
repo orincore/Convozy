@@ -42,8 +42,15 @@ export class ReplyLinkButtonDto {
   @MinLength(1)
   title!: string;
 
+  // FOLLOW_PROFILE links to the connected account's own profile, resolved when
+  // the reply is sent (same as a FOLLOW_PROFILE button on a message).
+  @IsOptional()
+  @IsIn(['WEB_URL', 'FOLLOW_PROFILE'])
+  type?: 'WEB_URL' | 'FOLLOW_PROFILE';
+
+  @ValidateIf((o: ReplyLinkButtonDto) => o.type !== 'FOLLOW_PROFILE')
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
-  url!: string;
+  url?: string;
 }
 
 // A button on a DM (Meta's Button Template — messaging-api/button-template).

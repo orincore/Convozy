@@ -206,7 +206,9 @@ export interface ActionButtonInput {
 
 export interface ReplyLinkButtonInput {
   title: string;
-  url: string;
+  // Omitted for FOLLOW_PROFILE (the server links to the account's own profile).
+  url?: string;
+  type?: 'WEB_URL' | 'FOLLOW_PROFILE';
 }
 
 // Mirrors TriggerInput's matchType options (including the AI_INTENT stub) —

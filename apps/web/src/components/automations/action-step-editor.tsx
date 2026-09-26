@@ -139,6 +139,8 @@ export interface LinkButtonNode {
   id: string;
   title: string;
   url: string;
+  /** FOLLOW opens the connected account's own profile, so it needs no link. */
+  kind: 'LINK' | 'FOLLOW';
 }
 
 // A media attachment picked in the builder. Mutually exclusive with
@@ -245,8 +247,12 @@ export function addActionStep(
   });
 }
 
-function serializeLinkButtons(buttons: LinkButtonNode[]): { title: string; url: string }[] | undefined {
-  return buttons.length ? buttons.map((b) => ({ title: b.title.trim(), url: b.url.trim() })) : undefined;
+function serializeLinkButtons(buttons: LinkButtonNode[]): { title: string; url?: string; type?: 'FOLLOW_PROFILE' }[] | undefined {
+  return buttons.length
+    ? buttons.map((b) =>
+        b.kind === 'FOLLOW' ? { title: b.title.trim(), type: 'FOLLOW_PROFILE' as const } : { title: b.title.trim(), url: b.url.trim() },
+      )
+    : undefined;
 }
 
 /** Recursively serializes the editor's local tree into the API's ActionInput shape. */
@@ -316,6 +322,10 @@ export function serializeActionSteps(nodes: ActionStepNode[]): ActionInput[] {
   });
 }
 
+function toLinkNode(l: { title: string; url?: string; type?: 'WEB_URL' | 'FOLLOW_PROFILE' }): LinkButtonNode {
+  return { id: makeId(), title: l.title, url: l.url ?? '', kind: l.type === 'FOLLOW_PROFILE' ? 'FOLLOW' : 'LINK' };
+}
+
 // Only `type`/`url` are persisted server-side (ActionMediaDto) —
 // filename/size are upload-time-only presentation details, so a loaded
 // attachment's preview derives a filename from the URL and shows no size.
@@ -363,8 +373,8 @@ export function deserializeActionSteps(actions: AutomationAction[]): ActionStepN
         unlockedMedia: toMediaNode(b.unlockedMedia),
         lockedText: b.lockedText ?? '',
         lockedMedia: toMediaNode(b.lockedMedia),
-        unlockedButtons: (b.unlockedButtons ?? []).map((l) => ({ id: makeId(), title: l.title, url: l.url })),
-        lockedButtons: (b.lockedButtons ?? []).map((l) => ({ id: makeId(), title: l.title, url: l.url })),
+        unlockedButtons: (b.unlockedButtons ?? []).map(toLinkNode),
+        lockedButtons: (b.lockedButtons ?? []).map(toLinkNode),
       })),
       media: toMediaNode(action.payload?.media),
       conditionField: 'COMMENT_TEXT',
@@ -453,7 +463,7 @@ export function validateActionSteps(nodes: ActionStepNode[], depth = 1): string 
 function validateLinkButtons(buttonTitle: string, where: string, links: LinkButtonNode[]): string | null {
   for (const link of links) {
     if (!link.title.trim()) return `Every link button on "${buttonTitle}"'s ${where} needs a label.`;
-    if (!/^https?:\/\/\S+$/i.test(link.url.trim())) {
+    if (link.kind === 'LINK' && !/^https?:\/\/\S+$/i.test(link.url.trim())) {
       return `"${link.title || 'A link button'}" on "${buttonTitle}"'s ${where} needs a full link starting with https://`;
     }
   }
@@ -811,41 +821,57 @@ function ReplyLinkButtons({
   function patch(id: string, change: Partial<LinkButtonNode>) {
     onChange(buttons.map((b) => (b.id === id ? { ...b, ...change } : b)));
   }
+  const addClass =
+    'flex items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-2.5 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground';
   return (
     <div className="flex flex-col gap-2">
       {buttons.map((b) => (
-        <div key={b.id} className="grid grid-cols-[1fr_1.4fr_auto] items-center gap-2">
+        <div
+          key={b.id}
+          className={`grid items-center gap-2 ${b.kind === 'FOLLOW' ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_1.4fr_auto]'}`}
+        >
           <Input
             value={b.title}
             onChange={(e) => patch(b.id, { title: e.target.value })}
             placeholder="Button label"
-            aria-label="Link button label"
+            aria-label={b.kind === 'FOLLOW' ? 'Follow me button label' : 'Link button label'}
           />
-          <Input
-            value={b.url}
-            onChange={(e) => patch(b.id, { url: e.target.value })}
-            placeholder="https://example.com"
-            aria-label="Link button URL"
-          />
+          {b.kind === 'LINK' && (
+            <Input
+              value={b.url}
+              onChange={(e) => patch(b.id, { url: e.target.value })}
+              placeholder="https://example.com"
+              aria-label="Link button URL"
+            />
+          )}
           <button
             type="button"
             onClick={() => onChange(buttons.filter((x) => x.id !== b.id))}
             className="flex h-10 w-10 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger"
-            aria-label="Remove link button"
+            aria-label="Remove button"
           >
             <Trash size={14} />
           </button>
+          {b.kind === 'FOLLOW' && (
+            <p className="col-span-2 -mt-1 text-xs text-muted-foreground">Opens your Instagram profile so they can follow you.</p>
+          )}
         </div>
       ))}
       {buttons.length < 3 && (
-        <button
-          type="button"
-          onClick={() => onChange([...buttons, { id: makeId(), title: '', url: '' }])}
-          className="flex w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-border py-2.5 text-sm text-muted-foreground transition-colors hover:border-muted-foreground hover:text-foreground"
-        >
-          <Plus size={14} />
-          Add link button to this reply
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => onChange([...buttons, { id: makeId(), title: '', url: '', kind: 'LINK' }])} className={addClass}>
+            <Plus size={14} />
+            Add link button
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange([...buttons, { id: makeId(), title: 'Follow me', url: '', kind: 'FOLLOW' }])}
+            className={addClass}
+          >
+            <UserPlus size={14} />
+            Follow me button
+          </button>
+        </div>
       )}
     </div>
   );

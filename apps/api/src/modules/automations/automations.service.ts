@@ -30,7 +30,7 @@ import { AiProcessingJobData } from '../../queues/processors/ai-processing.proce
 import { PostbackEventJobData } from '../../queues/processors/postback-events.processor';
 import { CreateAutomationDto } from './dto/create-automation.dto';
 import { UpdateAutomationDto } from './dto/update-automation.dto';
-import { ActionDto, ActionPayloadDto } from './dto/action.dto';
+import { ActionButtonDto, ActionDto, ActionPayloadDto } from './dto/action.dto';
 import { ConditionDto } from './dto/condition.dto';
 import { TriggerDto } from './dto/trigger.dto';
 
@@ -785,6 +785,21 @@ export class AutomationsService {
     });
   }
 
+  // A tap-reply's link buttons: FOLLOW_PROFILE becomes a link to the account's
+  // own profile; one without a username to link to is dropped, not sent broken.
+  private async resolveReplyButtons(
+    buttons: NonNullable<ActionButtonDto['unlockedButtons']>,
+    instagramAccountId: string,
+  ): Promise<{ title: string; type: 'WEB_URL'; url: string }[]> {
+    const needsProfile = buttons.some((b) => b.type === 'FOLLOW_PROFILE');
+    const username = needsProfile ? await this.instagramService.getAccountUsername(instagramAccountId) : null;
+    return buttons.flatMap((b) => {
+      if (b.type !== 'FOLLOW_PROFILE') return b.url ? [{ title: b.title, type: 'WEB_URL' as const, url: b.url }] : [];
+      if (!username) return [];
+      return [{ title: b.title, type: 'WEB_URL' as const, url: `https://www.instagram.com/${encodeURIComponent(username)}/` }];
+    });
+  }
+
   private async renderMergeTags(
     template: string,
     ctx: { workspaceId: string; instagramAccountId: string; igScopedId?: string | null; username?: string | null },
@@ -890,7 +905,7 @@ export class AutomationsService {
         text,
         media,
         // Link buttons only ride on a text reply (validated at write time).
-        buttons: text && replyButtons?.length ? replyButtons.map((b) => ({ title: b.title, type: 'WEB_URL' as const, url: b.url })) : undefined,
+        buttons: text && replyButtons?.length ? await this.resolveReplyButtons(replyButtons, data.instagramAccountId) : undefined,
       },
     };
     // Stable jobId keyed off the postback's own message id — a safe no-op
