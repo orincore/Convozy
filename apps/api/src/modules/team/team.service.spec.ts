@@ -9,12 +9,20 @@ jest.mock('@nestjs/common', () => {
       super(typeof response === 'string' ? response : JSON.stringify(response));
     }
   }
+  class Logger {
+    log = jest.fn();
+    debug = jest.fn();
+    warn = jest.fn();
+    error = jest.fn();
+  }
   return {
     Injectable: () => () => {},
     HttpException,
     HttpStatus: { BAD_REQUEST: 400, NOT_FOUND: 404, CONFLICT: 409, FORBIDDEN: 403 },
+    Logger,
   };
 });
+jest.mock('@nestjs/config', () => ({ ConfigService: class {} }));
 
 import { TeamService } from './team.service';
 import { AppException, ConflictAppException, ForbiddenAppException } from '../../common/utils/app-exception';
@@ -27,7 +35,9 @@ function makeService() {
   const tx = {
     workspaceInvite: {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
-      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'inv-1', ...data })),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }) => Promise.resolve({ id: 'inv-1', ...data, workspace: { name: 'Acme' } })),
     },
   };
   const prisma = {
@@ -35,7 +45,9 @@ function makeService() {
     workspaceInvite: { deleteMany: jest.fn() },
     $transaction: jest.fn().mockImplementation((fn) => fn(tx)),
   } as any;
-  return { service: new TeamService(prisma), prisma, tx };
+  const emailService = { send: jest.fn().mockResolvedValue(undefined) } as any;
+  const configService = { get: jest.fn().mockReturnValue('https://convozy.orincore.com') } as any;
+  return { service: new TeamService(prisma, emailService, configService), prisma, tx, emailService };
 }
 
 describe('TeamService.createInvite', () => {
@@ -61,6 +73,29 @@ describe('TeamService.createInvite', () => {
     const { service, prisma } = makeService();
     prisma.user.findUnique.mockResolvedValue({ id: 'u' });
     await expect(service.createInvite('ws-1', owner, { email: 'x@y.com', role: 'MEMBER' })).rejects.toThrow(ConflictAppException);
+  });
+
+  it('sends the invite email with a working link, from the noreply alias', async () => {
+    const { service, emailService } = makeService();
+    await service.createInvite('ws-1', owner, { email: 'new@person.com', role: 'MEMBER' });
+
+    expect(emailService.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'new@person.com',
+        from: 'noreply',
+        subject: expect.stringContaining('Acme'),
+        html: expect.stringContaining('https://convozy.orincore.com/app/invite/'),
+      }),
+    );
+  });
+
+  it('still returns a usable invite when the email fails to send', async () => {
+    const { service, emailService } = makeService();
+    emailService.send.mockRejectedValue(new Error('SES down'));
+
+    const result = await service.createInvite('ws-1', owner, { email: 'new@person.com', role: 'MEMBER' });
+
+    expect(result.token).toBeTruthy();
   });
 });
 

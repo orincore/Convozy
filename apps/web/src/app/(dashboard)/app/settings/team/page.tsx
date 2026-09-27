@@ -82,17 +82,22 @@ export default function TeamPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
+      <h1 className="text-xl font-semibold">Team</h1>
       <p className="mt-1 text-sm text-muted-foreground">Everyone here can work tickets. Assign complaints to teammates and keep track together.</p>
 
-      {error && <p role="alert" className="mt-4 flex items-center gap-2 text-sm text-danger"><WarningCircle size={16} />{error}</p>}
+      {error && (
+        <div className="mt-4 flex items-center gap-2 rounded-[var(--radius-control)] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <WarningCircle size={16} weight="bold" />
+          {error}
+        </div>
+      )}
 
       {canManage && (
         <form onSubmit={invite} className="mt-6 flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-card p-6">
           <div>
             <h2 className="text-sm font-semibold">Invite a teammate</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              They sign in with Google using this email and join your workspace. We do not send email yet, so share the link with them yourself.
+              They sign in with Google using this email and join your workspace. We&apos;ll email them the link — you can also copy and share it yourself below.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end">

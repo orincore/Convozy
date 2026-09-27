@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
@@ -10,6 +11,9 @@ import {
 } from '../../common/utils/app-exception';
 import { generateInviteToken } from '../../common/utils/invite-token.util';
 import { CreateInviteDto } from './dto/create-invite.dto';
+import { EmailService } from '../notifications/email.service';
+import { renderEmailHtml, escapeHtml } from '../notifications/email-layout';
+import { AppConfig } from '../../config/configuration';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -17,12 +21,20 @@ const MEMBER_SELECT = { id: true, email: true, name: true, role: true, createdAt
 
 /**
  * Workspace members and invites. Roles: OWNER (creator, one per workspace),
- * ADMIN (manages team and settings), MEMBER (works tickets). There is no mail
- * service yet, so an invite is delivered as a one-time link the inviter copies.
+ * ADMIN (manages team and settings), MEMBER (works tickets). An invite is
+ * always returned as a one-time link (createInvite's return value) so the
+ * inviter can copy/share it manually — the invite email below is a
+ * best-effort convenience on top of that, not the only way to deliver it.
  */
 @Injectable()
 export class TeamService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(TeamService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService<AppConfig, true>,
+  ) {}
 
   listMembers(workspaceId: string) {
     return this.prisma.user.findMany({
@@ -62,10 +74,10 @@ export class TeamService {
     }
 
     const { token, hash } = generateInviteToken();
-    const invite = await this.prisma.$transaction(async (tx) => {
+    const { invite, workspaceName } = await this.prisma.$transaction(async (tx) => {
       // Re-inviting replaces the previous pending link so only one is live.
       await tx.workspaceInvite.deleteMany({ where: { workspaceId, email, acceptedAt: null } });
-      return tx.workspaceInvite.create({
+      const created = await tx.workspaceInvite.create({
         data: {
           workspaceId,
           email,
@@ -74,12 +86,55 @@ export class TeamService {
           invitedById: actor.userId,
           expiresAt: new Date(Date.now() + INVITE_TTL_MS),
         },
-        select: { id: true, email: true, role: true, expiresAt: true, createdAt: true },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          expiresAt: true,
+          createdAt: true,
+          workspace: { select: { name: true } },
+        },
       });
+      const { workspace, ...invite } = created;
+      return { invite, workspaceName: workspace.name };
     });
+
+    void this.sendInviteEmail({ email, token, workspaceName, invitedByEmail: actor.email });
 
     // The raw token is returned exactly once; only its hash is stored.
     return { invite, token };
+  }
+
+  /**
+   * Fire-and-forget: the invite is already usable via the link the caller
+   * gets back (createInvite's return value / the frontend's "copy link"
+   * flow), so a mail delivery failure here must never fail invite creation.
+   */
+  private async sendInviteEmail(params: {
+    email: string;
+    token: string;
+    workspaceName: string;
+    invitedByEmail: string;
+  }): Promise<void> {
+    const appBaseUrl = this.configService.get('appBaseUrl', { infer: true });
+    const inviteUrl = `${appBaseUrl.replace(/\/$/, '')}/app/invite/${params.token}`;
+
+    try {
+      await this.emailService.send({
+        to: params.email,
+        from: 'noreply',
+        subject: `You've been invited to join ${params.workspaceName} on Convozy`,
+        html: renderEmailHtml({
+          heading: `Join ${params.workspaceName} on Convozy`,
+          preheader: `${params.invitedByEmail} invited you to join ${params.workspaceName} on Convozy.`,
+          bodyHtml: `<p style="margin:0;">${escapeHtml(params.invitedByEmail)} invited you to join <strong>${escapeHtml(params.workspaceName)}</strong> on Convozy. This link expires in 7 days.</p>`,
+          cta: { label: 'Accept invite', url: inviteUrl },
+        }),
+        text: `${params.invitedByEmail} invited you to join ${params.workspaceName} on Convozy.\n\nAccept the invite: ${inviteUrl}\n\nThis link expires in 7 days. If you weren't expecting this, you can ignore this email.`,
+      });
+    } catch (err) {
+      this.logger.warn(`Invite email failed to send, link is still valid: ${(err as Error).message}`);
+    }
   }
 
   async revokeInvite(workspaceId: string, inviteId: string): Promise<void> {

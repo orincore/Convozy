@@ -78,6 +78,14 @@ export const envSchema = z.object({
   R2_BUCKET_NAME: optional(z.string()),
   R2_PUBLIC_URL_BASE: optional(z.string().url()),
 
+  // Email (AWS SES v2 — see apps/api/src/modules/notifications). Optional:
+  // matches Stripe/Razorpay/AI/R2's own optional pattern — outbound email is
+  // unavailable, not a boot failure, when unset.
+  AWS_REGION: optional(z.string()),
+  AWS_ACCESS_KEY_ID: optional(z.string()),
+  AWS_SECRET_ACCESS_KEY: optional(z.string()),
+  SES_CONFIGURATION_SET: optional(z.string()),
+
   // Worker tuning (ARCHITECTURE.md §5)
   QUEUE_CONCURRENCY_WEBHOOK: z.coerce.number().default(20),
   QUEUE_CONCURRENCY_MESSAGE_SEND: z.coerce.number().default(10),

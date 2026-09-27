@@ -65,6 +65,12 @@ export interface AppConfig {
     messageSendConcurrency: number;
     aiConcurrency: number;
   };
+  email: {
+    awsRegion?: string;
+    awsAccessKeyId?: string;
+    awsSecretAccessKey?: string;
+    sesConfigurationSet?: string;
+  };
 }
 
 export default function configuration(): AppConfig {
@@ -129,6 +135,12 @@ export default function configuration(): AppConfig {
       webhookConcurrency: env.QUEUE_CONCURRENCY_WEBHOOK,
       messageSendConcurrency: env.QUEUE_CONCURRENCY_MESSAGE_SEND,
       aiConcurrency: env.QUEUE_CONCURRENCY_AI,
+    },
+    email: {
+      awsRegion: env.AWS_REGION,
+      awsAccessKeyId: env.AWS_ACCESS_KEY_ID,
+      awsSecretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+      sesConfigurationSet: env.SES_CONFIGURATION_SET,
     },
   };
 }

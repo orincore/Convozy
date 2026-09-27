@@ -21,6 +21,7 @@ import { AutomationsModule } from './modules/automations/automations.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { MediaModule } from './modules/media/media.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 /**
  * Root module for the API (HTTP) entrypoint (main.ts). See worker.module.ts
@@ -47,6 +48,7 @@ import { MediaModule } from './modules/media/media.module';
     ActivityModule,
     ContactsModule,
     MediaModule,
+    NotificationsModule,
     TicketsModule,
     TeamModule,
   ],

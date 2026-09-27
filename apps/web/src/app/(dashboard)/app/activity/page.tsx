@@ -82,13 +82,13 @@ function EventRow({ event }: { event: ActivityEvent }) {
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-card">
-        <ClockCounterClockwise size={24} weight="bold" className="text-muted-foreground" />
+    <div className="flex flex-col items-center justify-center gap-4 rounded-[var(--radius-card)] border border-border bg-card px-6 py-16 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <ClockCounterClockwise size={22} />
       </div>
       <div>
-        <h1 className="text-xl font-semibold">No activity yet</h1>
-        <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+        <p className="text-sm font-medium text-foreground">No activity yet</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           Comments on your connected posts will show up here as they come in.
         </p>
       </div>
@@ -103,44 +103,50 @@ export default function ActivityPage() {
   function load() {
     activityApi
       .list()
-      .then(setEvents)
+      .then((result) => {
+        setEvents(result);
+        setError(null);
+      })
       .catch((err: ApiError) => setError(err.message));
   }
 
   useEffect(load, []);
 
-  if (events === null && !error) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <CircleNotch size={24} className="animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error && events === null) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
-        <WarningCircle size={24} className="text-danger" />
-        <p className="text-sm text-muted-foreground">{error}</p>
-        <Button variant="outline" size="sm" onClick={load}>
-          Retry
-        </Button>
-      </div>
-    );
-  }
-
-  if (events && events.length === 0) {
-    return <EmptyState />;
-  }
-
   return (
-    <div>
+    <div className="mx-auto max-w-5xl">
       <h1 className="text-xl font-semibold">Activity</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Every comment your connected accounts receive, and what happened as a result.
+      </p>
 
-      <div className="mt-6 flex flex-col divide-y divide-border rounded-[var(--radius-card)] border border-border bg-card">
-        {events?.map((event) => (
-          <EventRow key={event.id} event={event} />
-        ))}
+      {error && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <span className="flex items-center gap-2">
+            <WarningCircle size={16} weight="bold" />
+            {error}
+          </span>
+          <Button variant="outline" size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      <div className="mt-6">
+        {events === null && !error && (
+          <div className="flex items-center justify-center py-16">
+            <CircleNotch size={24} className="animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {events && events.length === 0 && <EmptyState />}
+
+        {events && events.length > 0 && (
+          <div className="flex flex-col divide-y divide-border rounded-[var(--radius-card)] border border-border bg-card">
+            {events.map((event) => (
+              <EventRow key={event.id} event={event} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
