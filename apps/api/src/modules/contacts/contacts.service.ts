@@ -47,6 +47,7 @@ export class ContactsService {
     instagramAccountId: string,
     igScopedId: string | null | undefined,
     username?: string | null,
+    name?: string | null,
   ): Promise<void> {
     if (!igScopedId) {
       return;
@@ -58,10 +59,12 @@ export class ContactsService {
         instagramAccountId,
         igScopedId,
         username: username ?? undefined,
+        name: name ?? undefined,
         lastInboundAt: new Date(),
       },
       update: {
         username: username ?? undefined,
+        name: name ?? undefined,
         lastInboundAt: new Date(),
       },
     });

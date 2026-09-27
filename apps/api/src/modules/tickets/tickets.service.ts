@@ -301,8 +301,12 @@ export class TicketsService {
       : await this.prisma.ticketParticipant.findFirst({ where: { ticketId: ticket.id, igScopedId: null, username } });
 
     const contact = igScopedId ? await this.contactsService.findByIgScopedId(workspaceId, instagramAccountId, igScopedId) : null;
+    // Real display name, resolved once and cached on Contact by
+    // WebhookEventsProcessor (see its own comment) — denormalized here too
+    // so the ticket list/chat UI never needs to join Contact.
     const participantUpdate: Prisma.TicketParticipantUpdateInput = {
       username: username ?? undefined,
+      name: contact?.name ?? undefined,
       ...(target.dm ? { lastInboundAt: target.message.at } : {}),
       ...(target.comment ? { latestCommentId: target.comment.id, latestCommentAt: target.comment.at } : {}),
     };
@@ -315,6 +319,7 @@ export class TicketsService {
           contactId: contact?.id,
           igScopedId,
           username,
+          name: contact?.name,
           lastInboundAt: target.dm ? target.message.at : undefined,
           latestCommentId: target.comment?.id,
           latestCommentAt: target.comment?.at,
@@ -414,6 +419,7 @@ export class TicketsService {
       where.OR = [
         { subject: { contains: q, mode: 'insensitive' } },
         { participants: { some: { username: { contains: q, mode: 'insensitive' } } } },
+        { participants: { some: { name: { contains: q, mode: 'insensitive' } } } },
         ...(number !== null ? [{ number }] : []),
       ];
     }
@@ -439,7 +445,7 @@ export class TicketsService {
           createdAt: true,
           assignee: { select: { id: true, name: true, email: true } },
           _count: { select: { participants: true } },
-          participants: { select: { username: true }, take: 3, orderBy: { createdAt: 'asc' } },
+          participants: { select: { username: true, name: true }, take: 3, orderBy: { createdAt: 'asc' } },
           messages: { select: { text: true, kind: true }, take: 1, orderBy: { createdAt: 'desc' } },
         },
       }),

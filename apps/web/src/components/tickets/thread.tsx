@@ -4,7 +4,7 @@ import { NotePencil, Paperclip, WarningCircle } from '@phosphor-icons/react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { TicketHistoryMessage, TicketMessage, TicketParticipant } from '@/lib/api';
 import { cn } from '@/lib/cn';
-import { initials, timeAgo } from '@/components/tickets/ticket-meta';
+import { initials, participantLabel, timeAgo } from '@/components/tickets/ticket-meta';
 
 export const CHANNEL_LABEL: Record<TicketMessage['channel'], string> = {
   COMMENT: 'Comment',
@@ -116,14 +116,14 @@ export function ThreadView({
         return (
           <div key={m.key} className={cn('flex gap-3', outbound && 'flex-row-reverse')}>
             <Avatar className="size-8 shrink-0">
-              <AvatarFallback className="text-[0.6875rem]">{outbound ? initials(m.authorName, 'Y') : initials(p?.username, '?')}</AvatarFallback>
+              <AvatarFallback className="text-[0.6875rem]">{outbound ? initials(m.authorName, 'Y') : initials(p ? p.name || p.username : null, '?')}</AvatarFallback>
             </Avatar>
             <div className={cn('flex max-w-[80%] flex-col gap-1', outbound && 'items-end')}>
               <p className="text-xs text-muted-foreground">
-                {outbound ? m.authorName || 'Your team' : p?.username ? `@${p.username}` : 'Customer'}
+                {outbound ? m.authorName || 'Your team' : p ? participantLabel(p, 'Customer') : 'Customer'}
                 {', '}
                 {CHANNEL_LABEL[m.channel]}
-                {outbound && showRecipient && p?.username ? ` to @${p.username}` : ''}, {timeAgo(m.createdAt)}
+                {outbound && showRecipient && p ? ` to ${participantLabel(p)}` : ''}, {timeAgo(m.createdAt)}
               </p>
               <p
                 className={cn(

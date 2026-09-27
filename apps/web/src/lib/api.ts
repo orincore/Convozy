@@ -503,7 +503,7 @@ export interface TicketListItem {
   createdAt: string;
   assignee: TicketAssignee | null;
   participantCount: number;
-  participants: { username: string | null }[];
+  participants: { username: string | null; name: string | null }[];
   lastMessage: { text: string; kind: 'INBOUND' | 'OUTBOUND' | 'NOTE' } | null;
 }
 
@@ -532,6 +532,10 @@ export interface TicketParticipant {
   id: string;
   igScopedId: string | null;
   username: string | null;
+  // Real display name (Meta's profile `name`), resolved server-side for DM/
+  // story-mention/referral senders who carry no username at all — see
+  // TicketsService.ingest. Prefer this over username/"Unknown" when set.
+  name: string | null;
   contactId: string | null;
   lastInboundAt: string | null;
   latestCommentId: string | null;

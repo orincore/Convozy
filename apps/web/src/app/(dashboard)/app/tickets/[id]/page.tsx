@@ -45,6 +45,7 @@ import {
   STATUS_ORDER,
   StatusBadge,
   initials,
+  participantLabel,
   timeAgo,
 } from '@/components/tickets/ticket-meta';
 
@@ -292,10 +293,10 @@ export default function TicketDetailPage() {
               {ticket.participants.map((p) => (
                 <li key={p.id} className="flex items-start gap-3">
                   <Avatar className="size-8">
-                    <AvatarFallback className="text-[0.6875rem]">{initials(p.username)}</AvatarFallback>
+                    <AvatarFallback className="text-[0.6875rem]">{initials(p.name || p.username)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 text-sm">
-                    <p className="truncate font-medium">{p.username ? `@${p.username}` : 'Unknown'}</p>
+                    <p className="truncate font-medium">{participantLabel(p)}</p>
                     <p className="text-xs text-muted-foreground">
                       {p.replyOptions.dmMode === 'DM'
                         ? 'Can message now'

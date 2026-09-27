@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { ApiError, TicketDetail, TicketHistoryMessage, ticketsApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useTicketStream } from '@/lib/ticket-stream';
-import { StatusBadge, initials } from '@/components/tickets/ticket-meta';
+import { StatusBadge, initials, participantLabel } from '@/components/tickets/ticket-meta';
 import { TicketComposer } from '@/components/tickets/composer';
 import { ThreadView, buildThread } from '@/components/tickets/thread';
 
@@ -113,17 +113,30 @@ export default function TicketChatPage() {
 
   const closed = ticket.status === 'RESOLVED' || ticket.status === 'CLOSED';
 
+  const multiParticipant = ticket.participants.length > 1;
+
   return (
-    <div className="mx-auto flex h-[calc(100dvh-6rem)] min-h-[32rem] max-w-5xl flex-col">
+    <div className="flex h-[calc(100dvh-6rem)] min-h-[32rem] w-full flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 pb-4">
-        <div className="min-w-0">
-          <Link href={`/app/tickets/${ticket.id}`} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft size={14} />
-            Ticket #{ticket.number}
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            href={`/app/tickets/${ticket.id}`}
+            className="flex shrink-0 items-center justify-center rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Back to ticket"
+          >
+            <ArrowLeft size={16} />
           </Link>
-          <h1 className="mt-1 truncate text-lg font-semibold tracking-tight">{ticket.subject}</h1>
+          <Avatar className="size-9 shrink-0">
+            <AvatarFallback className="text-xs">{initials(active ? active.name || active.username : null)}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-semibold tracking-tight">{active ? participantLabel(active) : 'Unknown'}</h1>
+            <p className="truncate text-xs text-muted-foreground">
+              Ticket #{ticket.number} · {ticket.subject}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className={cn('size-1.5 rounded-full', live === 'live' ? 'bg-success' : 'bg-muted-foreground')} />
             {live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Reconnecting'}
@@ -142,29 +155,34 @@ export default function TicketChatPage() {
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="People" className="flex gap-2 overflow-x-auto md:flex-col md:overflow-y-auto">
-          {ticket.participants.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setParticipantId(p.id)}
-              aria-current={p.id === activeId}
-              className={cn(
-                'flex shrink-0 items-center gap-2.5 rounded-[var(--radius-control)] border px-3 py-2 text-left text-sm transition-colors',
-                p.id === activeId ? 'border-accent bg-card' : 'border-border text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <Avatar className="size-7">
-                <AvatarFallback className="text-[0.625rem]">{initials(p.username)}</AvatarFallback>
-              </Avatar>
-              <span className="truncate">{p.username ? `@${p.username}` : 'Unknown'}</span>
-            </button>
-          ))}
-        </nav>
+      {/* Most tickets are a 1:1 conversation — the People switcher only earns
+       * its space (and the chat its narrower width) when there's actually
+       * more than one participant to switch between. */}
+      <div className={cn('grid min-h-0 flex-1 gap-4', multiParticipant ? 'grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)]' : 'grid-cols-1')}>
+        {multiParticipant && (
+          <nav aria-label="People" className="flex gap-2 overflow-x-auto md:flex-col md:overflow-y-auto">
+            {ticket.participants.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setParticipantId(p.id)}
+                aria-current={p.id === activeId}
+                className={cn(
+                  'flex shrink-0 items-center gap-2.5 rounded-[var(--radius-control)] border px-3 py-2 text-left text-sm transition-colors',
+                  p.id === activeId ? 'border-accent bg-card' : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Avatar className="size-7">
+                  <AvatarFallback className="text-[0.625rem]">{initials(p.name || p.username)}</AvatarFallback>
+                </Avatar>
+                <span className="truncate">{participantLabel(p)}</span>
+              </button>
+            ))}
+          </nav>
+        )}
 
         <section aria-label="Conversation" className="flex min-h-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-card">
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+          <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto p-5">
             {igHistory === null && (
               <p className="flex items-start gap-2 rounded-[var(--radius-control)] bg-muted px-3 py-2 text-xs text-muted-foreground">
                 <Info size={14} className="mt-px shrink-0" />
@@ -181,16 +199,18 @@ export default function TicketChatPage() {
             <div ref={end} />
           </div>
           <Separator />
-          <TicketComposer
-            ticket={ticket}
-            participantId={activeId ?? ''}
-            onParticipantChange={setParticipantId}
-            onSent={() => {
-              load();
-              if (activeId) loadHistory(activeId);
-            }}
-            onError={setActionError}
-          />
+          <div className="mx-auto w-full max-w-3xl">
+            <TicketComposer
+              ticket={ticket}
+              participantId={activeId ?? ''}
+              onParticipantChange={setParticipantId}
+              onSent={() => {
+                load();
+                if (activeId) loadHistory(activeId);
+              }}
+              onError={setActionError}
+            />
+          </div>
         </section>
       </div>
     </div>

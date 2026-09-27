@@ -63,6 +63,15 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/** Prefer the resolved real name over the raw @username, over "Unknown" —
+ * see TicketParticipant.name's comment in lib/api.ts for why a DM/story-
+ * mention/referral participant often has no username at all. */
+export function participantLabel(p: { username: string | null; name?: string | null }, fallback = 'Unknown'): string {
+  if (p.name) return p.name;
+  if (p.username) return `@${p.username}`;
+  return fallback;
+}
+
 export function initials(name: string | null | undefined, fallback = '?'): string {
   const source = (name ?? '').trim();
   if (!source) return fallback;

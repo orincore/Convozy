@@ -42,6 +42,8 @@ jest.mock('@nestjs/common', () => {
 // TicketsService pulls in the messaging/instagram modules (ESM-only
 // dependencies ts-jest can't load); this suite only needs a stand-in class.
 jest.mock('../../modules/tickets/tickets.service', () => ({ TicketsService: class {} }));
+// Same reasoning — InstagramService transitively imports @nestjs/config.
+jest.mock('../../modules/instagram/instagram.service', () => ({ InstagramService: class {} }));
 
 import { WebhookEventsProcessor, WebhookEventJobData } from './webhook-events.processor';
 
@@ -50,7 +52,14 @@ function makeTicketsService() {
 }
 
 function makeContactsService() {
-  return { recordInbound: jest.fn().mockResolvedValue(undefined) } as any;
+  return {
+    recordInbound: jest.fn().mockResolvedValue(undefined),
+    findByIgScopedId: jest.fn().mockResolvedValue(null),
+  } as any;
+}
+
+function makeInstagramService() {
+  return { fetchSenderProfile: jest.fn().mockResolvedValue({ name: null, username: null }) } as any;
 }
 
 function makeJob(data: Partial<WebhookEventJobData> = {}) {
@@ -76,7 +85,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), makeInstagramService(), queue);
     await processor.process(makeJob());
 
     expect(prisma.commentEvent.create).not.toHaveBeenCalled();
@@ -94,7 +103,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), makeInstagramService(), queue);
     await processor.process(makeJob());
 
     expect(prisma.commentEvent.create).toHaveBeenCalledWith(
@@ -121,7 +130,7 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), makeInstagramService(), queue);
     await processor.process(makeJob({ fromIgScopedId: 'ig-scoped-1', fromUsername: 'viewer123' }));
 
     expect(contactsService.recordInbound).toHaveBeenCalledWith(
@@ -129,6 +138,7 @@ describe('WebhookEventsProcessor', () => {
       'ig-account-1',
       'ig-scoped-1',
       'viewer123',
+      null,
     );
   });
 
@@ -140,12 +150,46 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), makeInstagramService(), queue);
     await processor.process(
       makeJob({ source: 'STORY_REPLY', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }),
     );
 
-    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', undefined);
+    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', undefined, null);
+  });
+
+  it('resolves a DM sender\'s real name/username via the Graph API when no Contact exists yet', async () => {
+    const prisma = {
+      instagramAccount: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'workspace-1' }) },
+      commentEvent: { create: jest.fn().mockResolvedValue({ id: 'comment-event-1' }) },
+    } as any;
+    const queue = { add: jest.fn() } as any;
+    const contactsService = makeContactsService();
+    const instagramService = makeInstagramService();
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe' });
+
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), instagramService, queue);
+    await processor.process(makeJob({ source: 'DM', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }));
+
+    expect(instagramService.fetchSenderProfile).toHaveBeenCalledWith('ig-account-1', 'ig-scoped-1');
+    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', 'jane.doe', 'Jane Doe');
+  });
+
+  it('reuses an already-cached Contact name instead of calling the Graph API again', async () => {
+    const prisma = {
+      instagramAccount: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'workspace-1' }) },
+      commentEvent: { create: jest.fn().mockResolvedValue({ id: 'comment-event-1' }) },
+    } as any;
+    const queue = { add: jest.fn() } as any;
+    const contactsService = makeContactsService();
+    contactsService.findByIgScopedId.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe' });
+    const instagramService = makeInstagramService();
+
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), instagramService, queue);
+    await processor.process(makeJob({ source: 'DM', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }));
+
+    expect(instagramService.fetchSenderProfile).not.toHaveBeenCalled();
+    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', 'jane.doe', 'Jane Doe');
   });
 
   it('never lets a Contact-tracking failure block automation matching (non-fatal)', async () => {
@@ -156,7 +200,7 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = { recordInbound: jest.fn().mockRejectedValue(new Error('db hiccup')) } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), makeInstagramService(), queue);
     await expect(processor.process(makeJob())).resolves.toBeUndefined();
 
     expect(queue.add).toHaveBeenCalled();
@@ -177,7 +221,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), makeInstagramService(), queue);
     await expect(processor.process(makeJob())).resolves.toBeUndefined();
 
     expect(queue.add).not.toHaveBeenCalled();
@@ -194,7 +238,7 @@ describe('WebhookEventsProcessor', () => {
     } as any;
     const queue = { add: jest.fn() } as any;
 
-    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), queue);
+    const processor = new WebhookEventsProcessor(prisma, makeContactsService(), makeTicketsService(), makeInstagramService(), queue);
     await expect(processor.process(makeJob())).rejects.toThrow('connection reset');
   });
 });

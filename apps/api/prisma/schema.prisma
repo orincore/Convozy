@@ -569,6 +569,13 @@ model Contact {
 
   igScopedId String
   username   String?
+  // Real display name (Meta's `name` field on the IG-scoped user), separate
+  // from username: DM/story-mention/referral senders carry no username at
+  // all in their webhook payload (only a numeric IG-scoped ID) — this is
+  // backfilled via InstagramService.fetchSenderProfile the first time we see
+  // them, so the UI can show a real name instead of "Unknown". Comments
+  // already carry a real username directly and don't need this.
+  name String?
 
   // Drives Milestone 8's real-time broadcast-eligibility check (Instagram
   // has no message-tag mechanism to message outside the 24h window) and
@@ -822,6 +829,9 @@ model TicketParticipant {
   // IG-scoped ID, so there is nobody we can message.
   igScopedId String?
   username   String?
+  // See Contact.name's comment — same backfill, denormalized onto the
+  // participant row so the ticket list/chat UI don't need to join Contact.
+  name String?
 
   // Drives what an agent may send (Meta rules): a DM only within 24h of their
   // last inbound message; one private reply per comment within 7 days.

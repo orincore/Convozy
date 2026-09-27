@@ -6,6 +6,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ContactsService } from '../../modules/contacts/contacts.service';
 import { QueueName } from '../constants';
 import { TicketsService } from '../../modules/tickets/tickets.service';
+import { InstagramService } from '../../modules/instagram/instagram.service';
 import { AutomationMatchJobData } from './automation-match.processor';
 
 export interface WebhookEventJobData {
@@ -36,6 +37,7 @@ export class WebhookEventsProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly contactsService: ContactsService,
     private readonly ticketsService: TicketsService,
+    private readonly instagramService: InstagramService,
     @InjectQueue(QueueName.AUTOMATION_MATCH)
     private readonly automationMatchQueue: Queue<AutomationMatchJobData>,
   ) {
@@ -85,21 +87,36 @@ export class WebhookEventsProcessor extends WorkerHost {
       throw err;
     }
 
-    // Fires for every inbound event, matched or not — a Contact should
-    // exist for anyone who has ever interacted, not just people an
-    // automation happened to reply to. Non-fatal: contact tracking must
-    // never block the core comment-to-DM pipeline (same principle as the
-    // non-fatal subscribeToWebhooks call in InstagramService). STORY_REPLY's
-    // fromUsername is actually the sender's numeric IG-scoped ID (no real
-    // username available in that webhook payload — see mapMessagingEventToJobData),
-    // so it's never passed as a display username here.
+    // Conversation-sourced events (DM/STORY_REPLY/STORY_MENTION/REFERRAL)
+    // carry no username at all in their webhook payload — only the sender's
+    // numeric IG-scoped ID (see mapMessagingEventToJobData) — which is why
+    // the ticket/chat UI used to show "Unknown"/"Customer" for every DM.
+    // Resolve their real name/username once via the Graph API and cache it
+    // on Contact, so this only costs one extra call the first time we see a
+    // given person, not on every message. Non-fatal: never block the core
+    // pipeline on this (same principle as the non-fatal subscribeToWebhooks
+    // call in InstagramService).
+    const isConversationSourced = data.source !== 'COMMENT' && data.source !== 'LIVE_COMMENT';
+    let resolvedName: string | null = null;
+    let resolvedUsername = isConversationSourced ? undefined : data.fromUsername;
+    if (isConversationSourced && data.fromIgScopedId) {
+      const existingContact = await this.contactsService
+        .findByIgScopedId(account.workspaceId, data.instagramAccountId, data.fromIgScopedId)
+        .catch(() => null);
+      if (existingContact?.name) {
+        resolvedName = existingContact.name;
+        resolvedUsername = existingContact.username ?? undefined;
+      } else {
+        const profile = await this.instagramService
+          .fetchSenderProfile(data.instagramAccountId, data.fromIgScopedId)
+          .catch(() => ({ name: null, username: null }));
+        resolvedName = profile.name;
+        resolvedUsername = profile.username ?? undefined;
+      }
+    }
+
     await this.contactsService
-      .recordInbound(
-        account.workspaceId,
-        data.instagramAccountId,
-        data.fromIgScopedId,
-        data.source === 'COMMENT' || data.source === 'LIVE_COMMENT' ? data.fromUsername : undefined,
-      )
+      .recordInbound(account.workspaceId, data.instagramAccountId, data.fromIgScopedId, resolvedUsername, resolvedName)
       .catch((err) => {
         this.logger.error(`Contact tracking failed for event ${data.externalEventId}: ${(err as Error).message}`);
       });

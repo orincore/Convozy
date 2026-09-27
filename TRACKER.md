@@ -1969,6 +1969,64 @@ exercised a realistic Meta timestamp value.
 
 ---
 
+## Tickets/chat: real names instead of "Unknown", chat page layout, reply-to-message (2026-09-27)
+
+- ✅ **Real names, done.** User noticed the tickets inbox/chat showed
+  "Customer"/"Unknown" for DM-originated conversations. Root cause: Meta's
+  messaging webhook never includes a username for the sender, only a numeric
+  IG-scoped ID (`mapMessagingEventToJobData`) — comments carry a real
+  `from.username` directly so those tickets were always fine. The real name
+  *was* already fetchable (`InstagramService.fetchSenderProfile`,
+  `graph.instagram.com/{igScopedId}?fields=name,username`) but was only ever
+  called for `{{username}}`/`{{full_name}}` merge-tag rendering in automated
+  replies, never for tickets/contacts.
+  - Added `Contact.name` / `TicketParticipant.name` (additive migration
+    `20260927151058_ticket_participant_real_name`).
+  - `WebhookEventsProcessor` (the one place `ContactsService.recordInbound`
+    is already called for every inbound event, ticket or not) now resolves
+    the sender's real name/username for conversation-sourced events (DM/
+    story-reply/mention/referral) via `fetchSenderProfile` — but only the
+    first time a given Contact is seen (checks `findByIgScopedId` first);
+    once cached, no repeat Graph API call on every subsequent message.
+    Comment-sourced events are untouched (already have a real username).
+  - `TicketsService.ingest()` copies `contact.name` onto the
+    `TicketParticipant` row (no second fetch — the Contact is already
+    enriched by the time ingest runs, since recordInbound is awaited first).
+  - New shared `participantLabel()` helper (`ticket-meta.tsx`): name → else
+    `@username` → else "Unknown"/"Customer". Replaces the four separate
+    "Unknown"/"Customer" fallback sites (`tickets/page.tsx`,
+    `tickets/[id]/page.tsx`, `tickets/[id]/chat/page.tsx`, `thread.tsx`) so
+    they can't drift out of sync again.
+  - Tests: `webhook-events.processor.spec.ts` — resolves via Graph API when
+    no Contact exists, reuses a cached name without a second API call.
+- ✅ **Chat page layout, done.** User: "a lot of blank space in left side...
+  show other user's name at top and use full width." Root cause: the
+  participant "People" nav was a fixed 220px column shown even for the
+  overwhelming common case of exactly one participant (this page's own doc
+  comment: "Full conversation with one person"), plus the whole page was
+  capped at `max-w-5xl` nested inside the dashboard shell's own `max-w-7xl`.
+  `apps/web/src/app/(dashboard)/app/tickets/[id]/chat/page.tsx`: the People
+  nav now only renders when there's genuinely more than one participant; the
+  header shows the active participant's avatar + real name (via
+  `participantLabel`) as the primary heading instead of a side column; the
+  conversation card now fills the full available width. Message/composer
+  content itself stays centered at a readable `max-w-3xl` *inside* that
+  full-width card (unbounded line length reads worse, not better) — "full
+  width" was applied to reclaiming the wasted space, not to stretching text
+  edge-to-edge.
+- ☐ **"Reply to a specific message" (quote-reply) — not built, confirmed
+  buildable.** User asked whether this exists; it doesn't (`TicketComposer`
+  only has DM/public-reply/note mode + participant selection, no per-message
+  reply target). Verified against Meta's own docs (not assumed): Instagram's
+  Send API genuinely supports it —
+  `POST /{IG_ID}/messages` with `"reply_to": {"mid": "<MESSAGE_ID>"}`
+  alongside the normal `recipient`/`message` body, for either a message the
+  business sent or one the user sent. This is a real, scoped feature to
+  build (composer UI to pick/clear a "replying to" target per message bubble,
+  `MessagingService`/reply DTO changes to carry `replyToMid`) — not attempted
+  yet, needs a scoping decision on how the UI should let someone pick a
+  target message before building it.
+
 ## Risks / known unknowns
 
 - Meta App Review approval timeline for messaging/comment-management scopes is

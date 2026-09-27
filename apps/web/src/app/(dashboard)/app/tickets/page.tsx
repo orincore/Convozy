@@ -31,6 +31,7 @@ import {
   STATUS_ORDER,
   StatusBadge,
   initials,
+  participantLabel,
   timeAgo,
 } from '@/components/tickets/ticket-meta';
 
@@ -270,7 +271,7 @@ export default function TicketsPage() {
           <ul className="divide-y divide-border">
             {data.items.map((t) => {
               const Source = SOURCE_META[t.source];
-              const who = t.participants.map((p) => (p.username ? `@${p.username}` : 'Unknown')).join(', ');
+              const who = t.participants.map((p) => participantLabel(p)).join(', ');
               return (
                 <li key={t.id}>
                   <button
