@@ -14,7 +14,7 @@ const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001'
 
 const TITLE = 'Comment-to-DM Automation for Instagram | Convozy';
 const DESCRIPTION =
-  'Automatically DM anyone who comments a keyword on your Instagram post or Reel. Set it up in minutes, free to start.';
+  'Automatically DM anyone who comments a keyword on your Instagram post or Reel. Set it up in minutes - free and unlimited.';
 
 export const metadata: Metadata = {
   title: TITLE,

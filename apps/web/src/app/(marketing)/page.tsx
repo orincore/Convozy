@@ -28,10 +28,10 @@ import { hreflangAlternates } from '@/lib/seo';
 export const metadata: Metadata = {
   title: 'Convozy: Instagram Auto Reply & Comment-to-DM Automation Tool',
   description:
-    'Automatically reply to Instagram comments and send DMs when someone comments a keyword on your Reel or post. Free to start, no code required.',
+    'Automatically reply to Instagram comments and send DMs when someone comments a keyword on your Reel or post. Free and unlimited, no code required.',
   openGraph: {
     title: 'Convozy: Instagram Auto Reply & Comment-to-DM Automation Tool',
-    description: 'Turn "comment X and I\'ll DM you" into a fully automated flow. Free to start.',
+    description: 'Turn "comment X and I\'ll DM you" into a fully automated flow. Free and unlimited.',
     url: '/',
     siteName: 'Convozy',
     type: 'website',
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Convozy: Instagram Auto Reply & Comment-to-DM Automation Tool',
-    description: 'Turn "comment X and I\'ll DM you" into a fully automated flow. Free to start.',
+    description: 'Turn "comment X and I\'ll DM you" into a fully automated flow. Free and unlimited.',
   },
   alternates: {
     canonical: '/',
@@ -94,7 +94,7 @@ const FAQ_TABS: FaqTab[] = [
       {
         question: 'Is it really free?',
         answer:
-          'Yes. The Free plan is not a trial and needs no card. Paid plans are only for creators who send a lot of DMs or run more than one account.',
+          'Yes. DMs are unlimited on the Free plan and it is not a trial, so there is no card needed. Pro is only for creators who run more than one Instagram account.',
       },
       {
         question: 'Are there any hidden charges?',
@@ -102,7 +102,7 @@ const FAQ_TABS: FaqTab[] = [
       },
       {
         question: 'What do I get on Pro?',
-        answer: 'More DMs every month, more than one Instagram account, and priority support.',
+        answer: 'More than one Instagram account and priority support. DMs are already unlimited on Free.',
       },
       {
         question: 'Do I need a credit card to start?',

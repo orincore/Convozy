@@ -28,7 +28,7 @@ const FREE: Feature[] = [
 ];
 
 const PRO: Feature[] = [
-  { label: 'More DMs than your ex ever sent you' },
+  { label: 'Shared team and agency tools', soon: true, joke: 'Coming soon, like a joint bank account' },
   { label: 'More than one Instagram account, and nobody gets jealous' },
   { label: 'Priority support: we text back, unlike some people' },
   { label: 'AI replies: always says the right thing, unlike you at 2am', soon: true, joke: 'Coming soon, listens better than your ex' },
@@ -164,7 +164,7 @@ const GROUPS: Group[] = [
     title: 'Limits and support',
     rows: [
       { label: 'Instagram accounts', free: 'One', pro: 'More than one. Nobody gets jealous.' },
-      { label: 'DMs each month', free: 'Monthly limit', pro: 'Higher limit. Go ahead, get popular.' },
+      { label: 'DMs each month', free: 'Unlimited', pro: 'Unlimited' },
       { label: 'Support', free: 'Email', pro: 'Priority. We actually text back.' },
       { label: 'AI replies', free: false, pro: 'Coming soon, listens better than your ex' },
     ],

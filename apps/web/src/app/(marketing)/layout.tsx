@@ -52,7 +52,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     name: SITE_NAME,
     url: SITE_URL,
     logo: `${SITE_URL}/brand/logo-white.png`,
-    description: 'Convozy automates Instagram comment replies and DMs for creators - free to start.',
+    description: 'Convozy automates Instagram comment replies and DMs for creators - free, unlimited, no card needed.',
     parentOrganization: {
       '@type': 'Organization',
       name: 'Orincore',
@@ -67,7 +67,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
     description:
-      'Automate Instagram comment replies and DMs. Turn "comment X" posts into automatic, instant DM delivery - free to start.',
+      'Automate Instagram comment replies and DMs. Turn "comment X" posts into automatic, instant DM delivery - free and unlimited.',
     url: SITE_URL,
     areaServed: AREA_SERVED,
     publisher: { '@type': 'Organization', name: 'Orincore', url: 'https://www.orincore.com' },

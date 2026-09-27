@@ -79,7 +79,7 @@ export default function PrivacyPolicyPage() {
       <ul>
         <li>To operate the comment-to-DM automation you configure: matching keywords and sending the reply you set up, via Meta.</li>
         <li>To show you delivery status and basic analytics for your own automations.</li>
-        <li>To enforce plan limits (e.g. free-tier monthly send caps) and process billing.</li>
+        <li>To enforce Pro-plan features (e.g. connecting more than one Instagram account) and process billing.</li>
         <li>
           If you explicitly enable an AI-powered feature (e.g. AI-drafted replies), the relevant
           comment/message text is sent to our AI provider solely to generate that reply. This only

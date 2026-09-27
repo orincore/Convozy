@@ -52,8 +52,9 @@ export default function TermsOfServicePage() {
       <p>
         Convozy lets you configure automations that watch comments, direct messages, and story
         replies on your connected Instagram Business Account(s) and automatically send a reply or
-        direct message when a keyword rule you define is matched. We provide a free tier with
-        usage limits and paid plans with higher limits and additional features.
+        direct message when a keyword rule you define is matched. Our Free plan has no cap on DMs
+        sent or automations you can run; a paid Pro plan is available for more than one connected
+        Instagram account and additional features.
       </p>
 
       <h2>3. Your account and Instagram connection</h2>
@@ -75,7 +76,7 @@ export default function TermsOfServicePage() {
 
       <h2>5. Plans and billing</h2>
       <p>
-        Free-tier limits and paid-plan pricing are shown at{' '}
+        Free-plan details and paid-plan pricing are shown at{' '}
         <a href="/pricing">convozy.orincore.com/pricing</a>. Paid subscriptions are billed via
         Stripe or Razorpay depending on your billing region and renew automatically until
         cancelled. You can cancel at any time from your account settings; cancellation takes
