@@ -146,6 +146,54 @@ describe('MessagingService.send', () => {
     );
   });
 
+  it('quote-replies to a specific earlier message when replyToMid is set (manual ticket replies)', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'ig-scoped-user-1',
+        recipientType: 'user',
+        actionType: ActionType.SEND_DM,
+        replyToMid: 'mid-original-1',
+        content: { text: 'following up on this' },
+      }),
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://graph.instagram.com/v21.0/ig-user-1/messages',
+      expect.objectContaining({
+        body: JSON.stringify({
+          recipient: { id: 'ig-scoped-user-1' },
+          message: { text: 'following up on this' },
+          reply_to: { mid: 'mid-original-1' },
+        }),
+      }),
+    );
+  });
+
+  it('never sends reply_to for a private reply to a comment (recipient.comment_id shape)', async () => {
+    const { service } = makeService();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as any;
+
+    await service.send(
+      makeJob({
+        workspaceId: 'workspace-1',
+        instagramAccountId: 'account-1',
+        recipientId: 'comment-123',
+        recipientType: 'comment',
+        actionType: ActionType.SEND_DM,
+        replyToMid: 'mid-original-1',
+        content: { text: 'hi' },
+      }),
+    );
+
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(options.body as string)).not.toHaveProperty('reply_to');
+  });
+
   it('rejects REPLY_COMMENT for a conversation-sourced (non-comment) recipient rather than sending a malformed request', async () => {
     const { service } = makeService();
     global.fetch = jest.fn() as any;

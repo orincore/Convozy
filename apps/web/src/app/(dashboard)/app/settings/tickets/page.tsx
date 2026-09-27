@@ -2,16 +2,22 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle, CircleNotch, Plus, WarningCircle, X } from '@phosphor-icons/react';
+import { ArrowLeft, CheckCircle, CircleNotch, PencilSimple, Plus, Trash, WarningCircle, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { ApiError, TicketSettings, ticketsApi } from '@/lib/api';
+import { Textarea } from '@/components/ui/textarea';
+import { ApiError, SavedReply, TicketSettings, savedRepliesApi, ticketsApi } from '@/lib/api';
 import { getCurrentUser } from '@/lib/auth';
 
 const TOGGLES: { key: keyof Omit<TicketSettings, 'keywords' | 'enabled'>; title: string; hint: string }[] = [
+  {
+    key: 'autoAssignEnabled',
+    title: 'Auto-assign new tickets',
+    hint: 'Each new ticket goes to whoever on the team currently has the fewest open tickets, instead of sitting unassigned. A ticket must be assigned before anyone can DM through it, so this saves a manual step.',
+  },
   {
     key: 'createFromMentions',
     title: 'Comments that @mention your account',
@@ -164,6 +170,179 @@ export default function TicketSettingsPage() {
             </div>
           )}
         </div>
+      )}
+
+      <SavedRepliesSection />
+    </div>
+  );
+}
+
+function SavedRepliesSection() {
+  const [replies, setReplies] = useState<SavedReply[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
+  const [text, setText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editText, setEditText] = useState('');
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  function load() {
+    savedRepliesApi.list().then(setReplies).catch((err: ApiError) => setError(err.message));
+  }
+  useEffect(load, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || !text.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const reply = await savedRepliesApi.create({ title: title.trim(), text: text.trim() });
+      setReplies((current) => [...(current ?? []), reply].sort((a, b) => a.title.localeCompare(b.title)));
+      setTitle('');
+      setText('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not create the saved reply');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function startEdit(reply: SavedReply) {
+    setEditingId(reply.id);
+    setEditTitle(reply.title);
+    setEditText(reply.text);
+  }
+
+  async function handleSaveEdit(id: string) {
+    if (!editTitle.trim() || !editText.trim()) return;
+    setSavingEditId(id);
+    setError(null);
+    try {
+      const updated = await savedRepliesApi.update(id, { title: editTitle.trim(), text: editText.trim() });
+      setReplies((current) => (current ?? []).map((r) => (r.id === id ? updated : r)).sort((a, b) => a.title.localeCompare(b.title)));
+      setEditingId(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save changes');
+    } finally {
+      setSavingEditId(null);
+    }
+  }
+
+  async function handleDelete(reply: SavedReply) {
+    if (!window.confirm(`Delete the "${reply.title}" saved reply? It will disappear from the composer's saved-replies picker.`)) return;
+    setDeletingId(reply.id);
+    const previous = replies;
+    setReplies((current) => (current ?? []).filter((r) => r.id !== reply.id));
+    try {
+      await savedRepliesApi.remove(reply.id);
+    } catch (err) {
+      setReplies(previous);
+      setError(err instanceof ApiError ? err.message : 'Could not delete the saved reply');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <div className="mt-6 flex flex-col gap-5 rounded-[var(--radius-card)] border border-border bg-card p-6">
+      <div>
+        <h2 className="text-base font-semibold">Saved replies</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Canned responses anyone on the team can drop into a ticket reply. Support the same{' '}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">{'{{username}}'}</code>,{' '}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">{'{{full_name}}'}</code> and{' '}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">{'{{field.key}}'}</code> merge tags as automations.
+        </p>
+      </div>
+
+      <form onSubmit={handleCreate} className="flex flex-col gap-3 rounded-[var(--radius-control)] border border-border bg-background p-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reply-title">Title</Label>
+          <Input id="reply-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Shipping delay" />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="reply-text">Reply text</Label>
+          <Textarea
+            id="reply-text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            maxLength={1000}
+            placeholder={`Hi {{username}}, thanks for your patience — your order is on its way!`}
+            className="resize-none"
+          />
+        </div>
+        <Button type="submit" size="sm" className="self-end" disabled={submitting || !title.trim() || !text.trim()}>
+          {submitting ? <CircleNotch size={14} className="animate-spin" /> : <Plus size={14} />}
+          Add saved reply
+        </Button>
+      </form>
+
+      {error && (
+        <p role="alert" className="flex items-center gap-2 text-sm text-danger">
+          <WarningCircle size={16} />
+          {error}
+        </p>
+      )}
+
+      {replies === null && (
+        <div className="flex justify-center py-8">
+          <CircleNotch size={20} className="animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {replies && replies.length === 0 && <p className="text-sm text-muted-foreground">No saved replies yet — add one above.</p>}
+
+      {replies && replies.length > 0 && (
+        <ul className="divide-y divide-border rounded-[var(--radius-control)] border border-border">
+          {replies.map((reply) =>
+            editingId === reply.id ? (
+              <li key={reply.id} className="flex flex-col gap-3 p-4">
+                <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} aria-label="Title" />
+                <Textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={3} maxLength={1000} aria-label="Reply text" className="resize-none" />
+                <div className="flex items-center gap-2 self-end">
+                  <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={() => void handleSaveEdit(reply.id)} disabled={savingEditId === reply.id || !editTitle.trim() || !editText.trim()}>
+                    {savingEditId === reply.id && <CircleNotch size={14} className="animate-spin" />}
+                    Save
+                  </Button>
+                </div>
+              </li>
+            ) : (
+              <li key={reply.id} className="flex items-start justify-between gap-3 px-5 py-3.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">{reply.title}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{reply.text}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(reply)}
+                    className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label={`Edit ${reply.title}`}
+                  >
+                    <PencilSimple size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(reply)}
+                    disabled={deletingId === reply.id}
+                    className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
+                    aria-label={`Delete ${reply.title}`}
+                  >
+                    {deletingId === reply.id ? <CircleNotch size={14} className="animate-spin" /> : <Trash size={14} />}
+                  </button>
+                </div>
+              </li>
+            ),
+          )}
+        </ul>
       )}
     </div>
   );

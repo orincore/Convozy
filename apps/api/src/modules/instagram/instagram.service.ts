@@ -801,30 +801,43 @@ export class InstagramService {
    * above (any failure returns nulls, which AutomationsService.renderMergeTags
    * then renders as empty strings rather than blocking the send).
    */
-  async fetchSenderProfile(instagramAccountId: string, igScopedId: string): Promise<{ name: string | null; username: string | null }> {
+  async fetchSenderProfile(
+    instagramAccountId: string,
+    igScopedId: string,
+  ): Promise<{ name: string | null; username: string | null; profilePictureUrl: string | null }> {
     const credentials = await this.getSendCredentials(instagramAccountId);
     if (!credentials) {
-      return { name: null, username: null };
+      return { name: null, username: null, profilePictureUrl: null };
     }
 
     const version = this.configService.get('meta', { infer: true }).graphApiVersion;
     const params = new URLSearchParams({
-      fields: 'name,username',
+      fields: 'name,username,profile_pic',
       access_token: credentials.accessToken,
     });
 
     try {
       const res = await fetch(`https://graph.instagram.com/${version}/${igScopedId}?${params.toString()}`);
       if (!res.ok) {
+        // Expected, not just possible, for a COMMENT-only sender who has
+        // never DMed the account: Meta's User Profile API requires consent
+        // (granted only by messaging, an icebreaker, or the persistent menu)
+        // and returns an error otherwise — "User consent is required to
+        // access the user profile." Logged at debug, not warn, since this is
+        // the normal case for most commenters, not a real failure.
         const body = await res.text();
-        this.logger.warn(`Sender profile fetch failed for ${igScopedId} on account ${instagramAccountId}: ${res.status} ${body}`);
-        return { name: null, username: null };
+        this.logger.debug(`Sender profile fetch failed for ${igScopedId} on account ${instagramAccountId}: ${res.status} ${body}`);
+        return { name: null, username: null, profilePictureUrl: null };
       }
-      const json = (await res.json()) as { name?: string | null; username?: string | null };
-      return { name: json.name ?? null, username: json.username ?? null };
+      // profile_pic's URL expires after a few days (Meta's own docs) — this
+      // is cached as-is (see WebhookEventsProcessor/ContactsService), so a
+      // long-dormant contact's cached picture can go stale. Acceptable
+      // known limitation: no periodic refresh built for this yet.
+      const json = (await res.json()) as { name?: string | null; username?: string | null; profile_pic?: string | null };
+      return { name: json.name ?? null, username: json.username ?? null, profilePictureUrl: json.profile_pic ?? null };
     } catch (err) {
       this.logger.warn(`Sender profile fetch threw for ${igScopedId} on account ${instagramAccountId}: ${(err as Error).message}`);
-      return { name: null, username: null };
+      return { name: null, username: null, profilePictureUrl: null };
     }
   }
 

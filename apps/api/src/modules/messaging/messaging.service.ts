@@ -213,6 +213,11 @@ export class MessagingService {
           // sending the HUMAN_AGENT tag (Send API: "Required for Instagram
           // Messaging API"; needs the Human Agent permission approved for the app).
           ...(data.humanAgent ? { messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' } : {}),
+          // Quote-reply to a specific earlier message — confirmed via Meta's
+          // Send a Message docs: reply_to.mid alongside the normal
+          // recipient/message body, for either a message the business sent
+          // or one the user sent.
+          ...(data.replyToMid ? { reply_to: { mid: data.replyToMid } } : {}),
         },
         credentials.accessToken,
         version,

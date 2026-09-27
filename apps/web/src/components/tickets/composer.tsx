@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { ChatCircleDots, CircleNotch, LockSimple, PaperPlaneRight, UserSwitch } from '@phosphor-icons/react';
+import { useEffect, useState } from 'react';
+import { ArrowBendUpLeft, BookmarkSimple, ChatCircleDots, CircleNotch, LockSimple, PaperPlaneRight, UserSwitch, X } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { ApiError, TicketDetail, ticketsApi } from '@/lib/api';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ApiError, SavedReply, TicketDetail, savedRepliesApi, ticketsApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import type { ReplyTarget } from '@/components/tickets/thread';
 
 type Mode = 'DM' | 'PUBLIC_REPLY' | 'NOTE';
 const MODES: Mode[] = ['DM', 'PUBLIC_REPLY', 'NOTE'];
@@ -22,16 +24,26 @@ export function TicketComposer({
   onParticipantChange,
   onSent,
   onError,
+  replyTarget,
+  onClearReply,
 }: {
   ticket: TicketDetail;
   participantId: string;
   onParticipantChange?: (id: string) => void;
   onSent: () => void;
   onError: (message: string | null) => void;
+  /** Set when a message bubble's "reply" affordance was clicked (thread.tsx). Quote-replies are DM-only. */
+  replyTarget?: ReplyTarget | null;
+  onClearReply?: () => void;
 }) {
   const [chosenMode, setMode] = useState<Mode>('DM');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [savedReplies, setSavedReplies] = useState<SavedReply[] | null>(null);
+
+  useEffect(() => {
+    savedRepliesApi.list().then(setSavedReplies).catch(() => setSavedReplies([]));
+  }, []);
 
   const participant = ticket.participants.find((p) => p.id === participantId) ?? ticket.participants[ticket.participants.length - 1];
   const options = participant?.replyOptions;
@@ -62,8 +74,15 @@ export function TicketComposer({
     onError(null);
     try {
       if (mode === 'NOTE') await ticketsApi.addNote(ticket.id, body);
-      else await ticketsApi.reply(ticket.id, { participantId: participant.id, channel: mode, text: body });
+      else
+        await ticketsApi.reply(ticket.id, {
+          participantId: participant.id,
+          channel: mode,
+          text: body,
+          ...(mode === 'DM' && replyTarget ? { replyToMessageId: replyTarget.messageId } : {}),
+        });
       setText('');
+      onClearReply?.();
       onSent();
     } catch (err) {
       onError(err instanceof ApiError ? err.message : 'Could not send');
@@ -76,6 +95,10 @@ export function TicketComposer({
   function askToMessageAgain() {
     setMode('PUBLIC_REPLY');
     setText(`Hi @${participant?.username ?? 'there'}, we'd like to keep helping you. Please send us a DM and we'll continue there.`);
+  }
+
+  function insertSavedReply(reply: SavedReply) {
+    setText((current) => (current.trim() ? `${current.trim()}\n${reply.text}` : reply.text));
   }
 
   return (
@@ -138,6 +161,24 @@ export function TicketComposer({
         </div>
       )}
 
+      {mode === 'DM' && replyTarget && (
+        <div className="flex items-start gap-2 rounded-[var(--radius-control)] border border-border bg-muted px-3 py-2 text-xs">
+          <ArrowBendUpLeft size={13} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-foreground">Replying to {replyTarget.authorLabel}</p>
+            <p className="truncate text-muted-foreground">{replyTarget.text || 'Attachment'}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClearReply}
+            className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-background hover:text-foreground"
+            aria-label="Cancel reply"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -151,8 +192,30 @@ export function TicketComposer({
         aria-label="Message"
         className="min-h-20 resize-none"
       />
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">Ctrl or Cmd + Enter to send</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="hidden text-xs text-muted-foreground sm:inline">Ctrl or Cmd + Enter to send</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={!savedReplies?.length}
+                className="flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <BookmarkSimple size={13} />
+                Saved replies
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              {savedReplies?.map((reply) => (
+                <DropdownMenuItem key={reply.id} onSelect={() => insertSavedReply(reply)} className="flex-col items-start gap-0.5">
+                  <span className="font-medium">{reply.title}</span>
+                  <span className="line-clamp-1 w-full text-xs text-muted-foreground">{reply.text}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         <Button onClick={() => void send()} disabled={sending || !text.trim() || (Boolean(blocked) && mode !== 'NOTE')}>
           {sending ? <CircleNotch size={16} className="animate-spin" /> : <PaperPlaneRight size={16} />}
           {mode === 'NOTE' ? 'Add note' : 'Send'}

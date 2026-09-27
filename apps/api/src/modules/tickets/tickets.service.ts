@@ -17,6 +17,7 @@ import { AppException, NotFoundAppException } from '../../common/utils/app-excep
 import { InstagramService } from '../instagram/instagram.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { MergeTagsService } from '../contacts/merge-tags.service';
 import { TeamService } from '../team/team.service';
 import { TicketEventsService, TicketLiveEvent } from './ticket-events.service';
 import { ListTicketsQueryDto } from './dto/list-tickets.dto';
@@ -98,6 +99,7 @@ interface IngestTarget {
   participant: { igScopedId: string | null; username: string | null };
   message: { channel: TicketMessageChannel; text: string; externalId: string; at: Date };
   comment?: { id: string; at: Date };
+  autoAssignEnabled?: boolean;
 }
 
 @Injectable()
@@ -111,6 +113,7 @@ export class TicketsService {
     private readonly contactsService: ContactsService,
     private readonly teamService: TeamService,
     private readonly liveEvents: TicketEventsService,
+    private readonly mergeTagsService: MergeTagsService,
   ) {}
 
   private notify(ticket: { id: string; workspaceId: string; instagramAccountId: string }, reason: TicketLiveEvent['reason']): void {
@@ -166,7 +169,7 @@ export class TicketsService {
     const keywordHit = matchesKeyword(text, settings.keywords);
     const mentionHit = settings.createFromMentions && Boolean(handle) && text.toLowerCase().includes(`@${handle.toLowerCase()}`);
     const qualifies = keywordHit || mentionHit;
-    const base = { workspaceId: event.workspaceId, instagramAccountId: event.instagramAccountId };
+    const base = { workspaceId: event.workspaceId, instagramAccountId: event.instagramAccountId, autoAssignEnabled: settings.autoAssignEnabled };
     const participant = { igScopedId, username };
 
     if (isComment) {
@@ -260,6 +263,7 @@ export class TicketsService {
     await this.ingest({
       workspaceId: account.workspaceId,
       instagramAccountId,
+      autoAssignEnabled: settings.autoAssignEnabled,
       source: TicketSource.TAGGED_POST,
       dedupKey: `media:${item.id}`,
       subject: truncate(item.caption ?? '', 80) || `Tagged by @${item.username ?? 'someone'}`,
@@ -307,6 +311,7 @@ export class TicketsService {
     const participantUpdate: Prisma.TicketParticipantUpdateInput = {
       username: username ?? undefined,
       name: contact?.name ?? undefined,
+      profilePictureUrl: contact?.profilePictureUrl ?? undefined,
       ...(target.dm ? { lastInboundAt: target.message.at } : {}),
       ...(target.comment ? { latestCommentId: target.comment.id, latestCommentAt: target.comment.at } : {}),
     };
@@ -320,6 +325,7 @@ export class TicketsService {
           igScopedId,
           username,
           name: contact?.name,
+          profilePictureUrl: contact?.profilePictureUrl,
           lastInboundAt: target.dm ? target.message.at : undefined,
           latestCommentId: target.comment?.id,
           latestCommentAt: target.comment?.at,
@@ -361,11 +367,43 @@ export class TicketsService {
     this.notify(ticket, created ? 'created' : 'message');
   }
 
+  /**
+   * "Vacant" = currently has the fewest open (non-closed) tickets assigned
+   * in this workspace, not literally zero — a small team stays balanced
+   * instead of piling everything onto whoever happens to be at zero first.
+   * Ties go to whoever joined the workspace earliest (TeamService.listMembers'
+   * own order) — simple and deterministic, not a strict round robin.
+   */
+  private async pickVacantMember(workspaceId: string): Promise<string | null> {
+    const members = await this.teamService.listMembers(workspaceId);
+    if (members.length === 0) return null;
+
+    const counts = await this.prisma.ticket.groupBy({
+      by: ['assigneeId'],
+      where: { workspaceId, assigneeId: { not: null }, status: { notIn: CLOSED_STATUSES } },
+      _count: { _all: true },
+    });
+    const countByMember = new Map(counts.map((c) => [c.assigneeId as string, c._count._all]));
+
+    let best = members[0];
+    let bestCount = countByMember.get(best.id) ?? 0;
+    for (const member of members.slice(1)) {
+      const count = countByMember.get(member.id) ?? 0;
+      if (count < bestCount) {
+        best = member;
+        bestCount = count;
+      }
+    }
+    return best.id;
+  }
+
   private async createTicket(target: IngestTarget & { mediaPermalink?: string | null }): Promise<{ ticket: Ticket; created: boolean }> {
     let permalink = target.mediaPermalink ?? null;
     if (target.mediaId && !permalink && target.source === TicketSource.COMMENT) {
       permalink = (await this.instagramService.getMediaInfo(target.instagramAccountId, target.mediaId))?.permalink ?? null;
     }
+
+    const assigneeId = target.autoAssignEnabled ? await this.pickVacantMember(target.workspaceId) : null;
 
     // The per-workspace number and the dedup key are both unique: a clash on
     // the number retries with the next one, a clash on the dedup key means a
@@ -383,7 +421,13 @@ export class TicketsService {
             dedupKey: target.dedupKey,
             mediaId: target.mediaId ?? undefined,
             mediaPermalink: permalink ?? undefined,
-            events: { create: { type: 'CREATED', data: { source: target.source } } },
+            assigneeId: assigneeId ?? undefined,
+            events: {
+              create: [
+                { type: 'CREATED', data: { source: target.source } },
+                ...(assigneeId ? [{ type: 'ASSIGNED', data: { assigneeId, auto: true } }] : []),
+              ],
+            },
           },
         });
         return { ticket, created: true };
@@ -445,7 +489,7 @@ export class TicketsService {
           createdAt: true,
           assignee: { select: { id: true, name: true, email: true } },
           _count: { select: { participants: true } },
-          participants: { select: { username: true, name: true }, take: 3, orderBy: { createdAt: 'asc' } },
+          participants: { select: { username: true, name: true, profilePictureUrl: true }, take: 3, orderBy: { createdAt: 'asc' } },
           messages: { select: { text: true, kind: true }, take: 1, orderBy: { createdAt: 'desc' } },
         },
       }),
@@ -485,7 +529,10 @@ export class TicketsService {
         participants: { orderBy: { createdAt: 'asc' } },
         messages: {
           orderBy: { createdAt: 'asc' },
-          include: { author: { select: { id: true, name: true } } },
+          include: {
+            author: { select: { id: true, name: true } },
+            replyToMessage: { select: { id: true, text: true, kind: true } },
+          },
         },
         events: { orderBy: { createdAt: 'asc' }, include: { actor: { select: { id: true, name: true } } } },
       },
@@ -563,10 +610,20 @@ export class TicketsService {
     if (!participant) {
       throw new NotFoundAppException('PARTICIPANT_NOT_FOUND', 'That person is not on this ticket.');
     }
-    const text = dto.text.trim();
-    if (!text) {
+    const rawText = dto.text.trim();
+    if (!rawText) {
       throw new AppException('EMPTY_MESSAGE', 'Write a message first.');
     }
+    // Renders {{username}}/{{full_name}}/{{field.<key>}} the same way an
+    // automation's reply would (saved replies rely on this — see
+    // saved-replies.service.ts) — applies to every manual reply, typed or
+    // pasted from a saved reply, not just ones that came from the picker.
+    const text = await this.mergeTagsService.render(rawText, {
+      workspaceId,
+      instagramAccountId: ticket.instagramAccountId,
+      igScopedId: participant.igScopedId,
+      username: participant.username,
+    });
 
     const options = computeReplyOptions(participant);
     let job: { recipientType: 'comment' | 'user'; recipientId: string; actionType: ActionType };
@@ -581,6 +638,16 @@ export class TicketsService {
       job = { recipientType: 'comment', recipientId: participant.latestCommentId, actionType: ActionType.REPLY_COMMENT };
       channel = TicketMessageChannel.PUBLIC_REPLY;
     } else {
+      // A DM is customer-facing and irreversible once sent — someone has to
+      // own following up on it. User-directed rule, 2026-09-27: a ticket
+      // must be assigned before anyone can DM through it (manually, or via
+      // auto-assign — see settings.autoAssignEnabled).
+      if (!ticket.assigneeId) {
+        throw new AppException(
+          'TICKET_UNASSIGNED',
+          'Assign this ticket to someone before sending a DM through it.',
+        );
+      }
       if (!options.dmMode || !participant.igScopedId) {
         throw new AppException('DM_NOT_ALLOWED', options.dmUnavailableReason ?? 'You cannot message this person right now.');
       }
@@ -592,11 +659,31 @@ export class TicketsService {
       channel = TicketMessageChannel.DM;
     }
 
+    // Quote-reply (Meta's reply_to.mid): only valid for a conversation-shaped
+    // send (recipient.id), not a private reply to a comment (recipient.
+    // comment_id) — Meta's Private Replies docs never show reply_to on that
+    // shape, only the plain Send Message docs do. Silently ignored rather
+    // than erroring for a private reply, since the composer already hides
+    // the option in that case — this is defense in depth, not the primary
+    // guard.
+    let replyToMid: string | undefined;
+    if (dto.replyToMessageId && channel === TicketMessageChannel.DM && !usedPrivateReply) {
+      const target = await this.prisma.ticketMessage.findFirst({
+        where: { id: dto.replyToMessageId, ticketId: id },
+        select: { externalId: true },
+      });
+      if (!target?.externalId) {
+        throw new NotFoundAppException('REPLY_TARGET_NOT_FOUND', 'That message could not be found on this ticket.');
+      }
+      replyToMid = target.externalId;
+    }
+
     const result = await this.messagingService.sendManual({
       workspaceId,
       instagramAccountId: ticket.instagramAccountId,
       ...job,
       ...(humanAgent ? { humanAgent: true } : {}),
+      ...(replyToMid ? { replyToMid } : {}),
       content: { text },
     });
 
@@ -612,6 +699,7 @@ export class TicketsService {
         status: failed ? TicketMessageStatus.FAILED : TicketMessageStatus.SENT,
         error: failed ? (humanAgent ? `Instagram did not accept this Human Agent message: ${result.error}` : result.error) : null,
         authorUserId: user.userId,
+        replyToMessageId: replyToMid ? dto.replyToMessageId : undefined,
       },
       include: { author: { select: { id: true, name: true } } },
     });

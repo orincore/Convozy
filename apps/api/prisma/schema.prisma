@@ -117,6 +117,7 @@ model Workspace {
   segments           Segment[]
   tickets            Ticket[]
   ticketSettings     TicketSettings[]
+  savedReplies       SavedReply[]
   invites            WorkspaceInvite[]
 
   createdAt DateTime @default(now())
@@ -575,7 +576,8 @@ model Contact {
   // backfilled via InstagramService.fetchSenderProfile the first time we see
   // them, so the UI can show a real name instead of "Unknown". Comments
   // already carry a real username directly and don't need this.
-  name String?
+  name             String?
+  profilePictureUrl String?
 
   // Drives Milestone 8's real-time broadcast-eligibility check (Instagram
   // has no message-tag mechanism to message outside the 24h window) and
@@ -831,7 +833,8 @@ model TicketParticipant {
   username   String?
   // See Contact.name's comment — same backfill, denormalized onto the
   // participant row so the ticket list/chat UI don't need to join Contact.
-  name String?
+  name             String?
+  profilePictureUrl String?
 
   // Drives what an agent may send (Meta rules): a DM only within 24h of their
   // last inbound message; one private reply per comment within 7 days.
@@ -867,6 +870,13 @@ model TicketMessage {
 
   authorUserId String?
   author       User?   @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  // Quote-reply target (Meta's reply_to.mid) — another TicketMessage on the
+  // same ticket, inbound or outbound. Null for every message that isn't a
+  // reply to a specific earlier one.
+  replyToMessageId String?
+  replyToMessage   TicketMessage?  @relation("TicketMessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  repliesTo        TicketMessage[] @relation("TicketMessageReply")
 
   createdAt DateTime @default(now())
 
@@ -911,7 +921,32 @@ model TicketSettings {
   createFromReferrals      Boolean @default(false)
   createFromTaggedPosts    Boolean @default(true)
 
+  // When on, a newly created ticket is auto-assigned to whichever workspace
+  // member currently has the fewest open tickets (a simple "least loaded"
+  // rule, not strict round robin) instead of sitting unassigned. Off by
+  // default — manual assignment is the existing behavior.
+  autoAssignEnabled Boolean @default(false)
+
   updatedAt DateTime @updatedAt
+}
+
+model SavedReply {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // Short display name shown in the picker, e.g. "Apology".
+  title String
+  // Template text, supports the same merge tags as automations
+  // ({{username}}, {{full_name}}, {{field.<key>}}) — rendered at send time
+  // against the ticket's active participant, same renderer both use.
+  text String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, title])
+  @@index([workspaceId])
 }
 
 model WorkspaceInvite {

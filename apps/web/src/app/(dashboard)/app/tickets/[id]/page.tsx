@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   ApiError,
   TeamMember,
@@ -33,7 +33,7 @@ import {
   ticketsApi,
 } from '@/lib/api';
 import { TicketComposer } from '@/components/tickets/composer';
-import { ThreadView, buildThread } from '@/components/tickets/thread';
+import { ReplyTarget, ThreadView, buildThread } from '@/components/tickets/thread';
 import { useTicketStream } from '@/lib/ticket-stream';
 import { getCurrentUser } from '@/lib/auth';
 import { cn } from '@/lib/cn';
@@ -93,6 +93,7 @@ export default function TicketDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [participantId, setParticipantId] = useState('');
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
 
@@ -217,7 +218,7 @@ export default function TicketDetailPage() {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
         <section aria-label="Conversation" className="flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-card">
           <div className="flex max-h-[62dvh] min-h-64 flex-col gap-4 overflow-y-auto p-5">
-            <ThreadView items={thread} participants={ticket.participants} />
+            <ThreadView items={thread} participants={ticket.participants} onReply={setReplyTarget} />
             <div ref={threadEnd} />
           </div>
 
@@ -226,9 +227,14 @@ export default function TicketDetailPage() {
           <TicketComposer
             ticket={ticket}
             participantId={participantId}
-            onParticipantChange={setParticipantId}
+            onParticipantChange={(id) => {
+              setParticipantId(id);
+              setReplyTarget(null);
+            }}
             onSent={load}
             onError={setActionError}
+            replyTarget={replyTarget}
+            onClearReply={() => setReplyTarget(null)}
           />
         </section>
 
@@ -293,10 +299,12 @@ export default function TicketDetailPage() {
               {ticket.participants.map((p) => (
                 <li key={p.id} className="flex items-start gap-3">
                   <Avatar className="size-8">
+                    {p.profilePictureUrl && <AvatarImage src={p.profilePictureUrl} alt="" />}
                     <AvatarFallback className="text-[0.6875rem]">{initials(p.name || p.username)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 text-sm">
                     <p className="truncate font-medium">{participantLabel(p)}</p>
+                    {p.igScopedId && <p className="truncate text-[0.6875rem] text-muted-foreground/70">IGID {p.igScopedId}</p>}
                     <p className="text-xs text-muted-foreground">
                       {p.replyOptions.dmMode === 'DM'
                         ? 'Can message now'

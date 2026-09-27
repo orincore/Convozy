@@ -5,14 +5,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, CheckCircle, CircleNotch, Info } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { ApiError, TicketDetail, TicketHistoryMessage, ticketsApi } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useTicketStream } from '@/lib/ticket-stream';
 import { StatusBadge, initials, participantLabel } from '@/components/tickets/ticket-meta';
 import { TicketComposer } from '@/components/tickets/composer';
-import { ThreadView, buildThread } from '@/components/tickets/thread';
+import { ReplyTarget, ThreadView, buildThread } from '@/components/tickets/thread';
 
 /** Full conversation with one person: their whole Instagram DM history plus this ticket's comments, replies and notes. */
 export default function TicketChatPage() {
@@ -22,6 +22,7 @@ export default function TicketChatPage() {
   const [history, setHistory] = useState<Record<string, TicketHistoryMessage[] | null>>({});
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const lastKey = useRef('');
 
@@ -38,6 +39,11 @@ export default function TicketChatPage() {
 
   const active = ticket?.participants.find((p) => p.id === participantId) ?? ticket?.participants[ticket.participants.length - 1];
   const activeId = active?.id;
+
+  function changeParticipant(id: string) {
+    setParticipantId(id);
+    setReplyTarget(null);
+  }
 
   const loadHistory = useCallback(
     (pid: string) => {
@@ -127,12 +133,14 @@ export default function TicketChatPage() {
             <ArrowLeft size={16} />
           </Link>
           <Avatar className="size-9 shrink-0">
+            {active?.profilePictureUrl && <AvatarImage src={active.profilePictureUrl} alt="" />}
             <AvatarFallback className="text-xs">{initials(active ? active.name || active.username : null)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold tracking-tight">{active ? participantLabel(active) : 'Unknown'}</h1>
             <p className="truncate text-xs text-muted-foreground">
               Ticket #{ticket.number} · {ticket.subject}
+              {active?.igScopedId && <span className="ml-1.5 text-muted-foreground/70">· IGID {active.igScopedId}</span>}
             </p>
           </div>
         </div>
@@ -165,7 +173,7 @@ export default function TicketChatPage() {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setParticipantId(p.id)}
+                onClick={() => changeParticipant(p.id)}
                 aria-current={p.id === activeId}
                 className={cn(
                   'flex shrink-0 items-center gap-2.5 rounded-[var(--radius-control)] border px-3 py-2 text-left text-sm transition-colors',
@@ -173,6 +181,7 @@ export default function TicketChatPage() {
                 )}
               >
                 <Avatar className="size-7">
+                  {p.profilePictureUrl && <AvatarImage src={p.profilePictureUrl} alt="" />}
                   <AvatarFallback className="text-[0.625rem]">{initials(p.name || p.username)}</AvatarFallback>
                 </Avatar>
                 <span className="truncate">{participantLabel(p)}</span>
@@ -195,7 +204,7 @@ export default function TicketChatPage() {
                 Loading the full Instagram conversation
               </p>
             )}
-            <ThreadView items={thread} participants={ticket.participants} showRecipient={false} />
+            <ThreadView items={thread} participants={ticket.participants} showRecipient={false} onReply={setReplyTarget} />
             <div ref={end} />
           </div>
           <Separator />
@@ -203,12 +212,14 @@ export default function TicketChatPage() {
             <TicketComposer
               ticket={ticket}
               participantId={activeId ?? ''}
-              onParticipantChange={setParticipantId}
+              onParticipantChange={changeParticipant}
               onSent={() => {
                 load();
                 if (activeId) loadHistory(activeId);
               }}
               onError={setActionError}
+              replyTarget={replyTarget}
+              onClearReply={() => setReplyTarget(null)}
             />
           </div>
         </section>

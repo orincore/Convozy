@@ -785,7 +785,7 @@ describe('InstagramService', () => {
   });
 
   describe('fetchSenderProfile', () => {
-    it('returns name + username on success', async () => {
+    it('returns name + username + profilePictureUrl on success', async () => {
       const encryptedToken = encryptSecret('real-token', TOKEN_ENCRYPTION_KEY);
       const prisma = {
         instagramAccount: {
@@ -794,13 +794,17 @@ describe('InstagramService', () => {
             .mockResolvedValue({ encryptedAccessToken: encryptedToken, igBusinessId: 'ig-biz-1', status: InstagramAccountStatus.ACTIVE }),
         },
       } as any;
-      global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ name: 'Peter Chang', username: 'peter_chang' }) }) as any;
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ name: 'Peter Chang', username: 'peter_chang', profile_pic: 'https://example.com/pic.jpg' }) }) as any;
 
       const service = new InstagramService(prisma, makeConfigService(), {} as any);
       const result = await service.fetchSenderProfile('acc-1', 'igsid-1');
 
-      expect(result).toEqual({ name: 'Peter Chang', username: 'peter_chang' });
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('https://graph.instagram.com/v21.0/igsid-1?fields=name%2Cusername'));
+      expect(result).toEqual({ name: 'Peter Chang', username: 'peter_chang', profilePictureUrl: 'https://example.com/pic.jpg' });
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('https://graph.instagram.com/v21.0/igsid-1?fields=name%2Cusername%2Cprofile_pic'),
+      );
     });
 
     it('fails closed to nulls on a Graph API error response (e.g. consent required)', async () => {
@@ -816,7 +820,7 @@ describe('InstagramService', () => {
 
       const service = new InstagramService(prisma, makeConfigService(), {} as any);
 
-      expect(await service.fetchSenderProfile('acc-1', 'igsid-1')).toEqual({ name: null, username: null });
+      expect(await service.fetchSenderProfile('acc-1', 'igsid-1')).toEqual({ name: null, username: null, profilePictureUrl: null });
     });
 
     it('fails closed to nulls on a network-level failure instead of throwing', async () => {
@@ -832,7 +836,7 @@ describe('InstagramService', () => {
 
       const service = new InstagramService(prisma, makeConfigService(), {} as any);
 
-      await expect(service.fetchSenderProfile('acc-1', 'igsid-1')).resolves.toEqual({ name: null, username: null });
+      await expect(service.fetchSenderProfile('acc-1', 'igsid-1')).resolves.toEqual({ name: null, username: null, profilePictureUrl: null });
     });
 
     it('fails closed to nulls when the account has no usable credentials', async () => {
@@ -841,7 +845,7 @@ describe('InstagramService', () => {
 
       const service = new InstagramService(prisma, makeConfigService(), {} as any);
 
-      expect(await service.fetchSenderProfile('missing-acc', 'igsid-1')).toEqual({ name: null, username: null });
+      expect(await service.fetchSenderProfile('missing-acc', 'igsid-1')).toEqual({ name: null, username: null, profilePictureUrl: null });
       expect(global.fetch).not.toHaveBeenCalled();
     });
   });

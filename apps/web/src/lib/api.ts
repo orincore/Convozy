@@ -536,6 +536,10 @@ export interface TicketParticipant {
   // story-mention/referral senders who carry no username at all — see
   // TicketsService.ingest. Prefer this over username/"Unknown" when set.
   name: string | null;
+  // Meta's User Profile API `profile_pic` — expires after a few days
+  // (cached as-is, no refresh job), null when never resolved or the sender
+  // never granted consent (comment-only senders, most often).
+  profilePictureUrl: string | null;
   contactId: string | null;
   lastInboundAt: string | null;
   latestCommentId: string | null;
@@ -552,6 +556,10 @@ export interface TicketMessage {
   error: string | null;
   createdAt: string;
   author: { id: string; name: string | null } | null;
+  // Quote-reply target (Meta's reply_to.mid) — set when this message was
+  // sent as a reply to one specific earlier message on the same ticket.
+  replyToMessageId: string | null;
+  replyToMessage: { id: string; text: string; kind: 'INBOUND' | 'OUTBOUND' | 'NOTE' } | null;
 }
 
 export interface TicketEvent {
@@ -604,6 +612,18 @@ export interface TicketSettings {
   createFromStoryMentions: boolean;
   createFromReferrals: boolean;
   createFromTaggedPosts: boolean;
+  // When on, a new ticket is auto-assigned to whichever team member
+  // currently has the fewest open tickets. Off = manual assignment (the
+  // existing default) — required either way before a DM can be sent.
+  autoAssignEnabled: boolean;
+}
+
+export interface SavedReply {
+  id: string;
+  title: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ListTicketsParams {
@@ -629,7 +649,7 @@ export const ticketsApi = {
   get: (id: string) => authFetch<TicketDetail>(`/tickets/${id}`),
   update: (id: string, input: { status?: TicketStatus; priority?: TicketPriority; assigneeId?: string | null; subject?: string }) =>
     authFetch<TicketDetail>(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
-  reply: (id: string, input: { participantId: string; channel: 'DM' | 'PUBLIC_REPLY'; text: string }) =>
+  reply: (id: string, input: { participantId: string; channel: 'DM' | 'PUBLIC_REPLY'; text: string; replyToMessageId?: string }) =>
     authFetch<TicketMessage>(`/tickets/${id}/replies`, { method: 'POST', body: JSON.stringify(input) }),
   addNote: (id: string, text: string) =>
     authFetch<TicketMessage>(`/tickets/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) }),
@@ -647,6 +667,7 @@ export const ticketsApi = {
       createFromStoryMentions,
       createFromReferrals,
       createFromTaggedPosts,
+      autoAssignEnabled,
     } = input;
     return authFetch<TicketSettings>('/tickets/settings', {
       method: 'PUT',
@@ -658,9 +679,19 @@ export const ticketsApi = {
         createFromStoryMentions,
         createFromReferrals,
         createFromTaggedPosts,
+        autoAssignEnabled,
       }),
     });
   },
+};
+
+export const savedRepliesApi = {
+  list: () => authFetch<SavedReply[]>('/tickets/saved-replies'),
+  create: (input: { title: string; text: string }) =>
+    authFetch<SavedReply>('/tickets/saved-replies', { method: 'POST', body: JSON.stringify(input) }),
+  update: (id: string, input: { title?: string; text?: string }) =>
+    authFetch<SavedReply>(`/tickets/saved-replies/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  remove: (id: string) => authFetch<void>(`/tickets/saved-replies/${id}`, { method: 'DELETE' }),
 };
 
 // ── Team ──────────────────────────────────────────────────────────────────

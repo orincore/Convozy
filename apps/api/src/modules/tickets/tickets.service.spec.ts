@@ -76,6 +76,7 @@ function makeService(settings: Record<string, unknown> = {}) {
       findUnique: jest.fn().mockResolvedValue(null),
       findFirst: jest.fn(),
       aggregate: jest.fn().mockResolvedValue({ _max: { number: 4 } }),
+      groupBy: jest.fn().mockResolvedValue([]),
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'ticket-new', status: TicketStatus.OPEN, ...data })),
       update: jest.fn().mockResolvedValue({}),
     },
@@ -87,6 +88,7 @@ function makeService(settings: Record<string, unknown> = {}) {
     },
     ticketMessage: {
       findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'msg-1', ...data })),
     },
     ticketEvent: { create: jest.fn().mockResolvedValue({}) },
@@ -97,10 +99,14 @@ function makeService(settings: Record<string, unknown> = {}) {
     findByIgScopedId: jest.fn().mockResolvedValue({ id: 'contact-1' }),
     recordOutbound: jest.fn().mockResolvedValue(undefined),
   } as any;
-  const teamService = { getMember: jest.fn().mockResolvedValue({ id: 'user-2' }) } as any;
+  const teamService = {
+    getMember: jest.fn().mockResolvedValue({ id: 'user-2' }),
+    listMembers: jest.fn().mockResolvedValue([]),
+  } as any;
   const liveEvents = { publish: jest.fn().mockResolvedValue(undefined) } as any;
-  const service = new TicketsService(prisma, instagramService, messagingService, contactsService, teamService, liveEvents);
-  return { service, prisma, instagramService, messagingService, contactsService, teamService, liveEvents };
+  const mergeTagsService = { render: jest.fn((text: string) => Promise.resolve(text)) } as any;
+  const service = new TicketsService(prisma, instagramService, messagingService, contactsService, teamService, liveEvents, mergeTagsService);
+  return { service, prisma, instagramService, messagingService, contactsService, teamService, liveEvents, mergeTagsService };
 }
 
 describe('matchesKeyword', () => {
@@ -193,6 +199,50 @@ describe('TicketsService.ingestEvent', () => {
 
     expect(prisma.ticket.create).not.toHaveBeenCalled();
     expect(prisma.ticketMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('leaves a new ticket unassigned when auto-assign is off (the existing default)', async () => {
+    const { service, prisma, teamService } = makeService({ autoAssignEnabled: false });
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ text: 'I want a refund' }));
+
+    await service.ingestEvent('event-1');
+
+    expect(teamService.listMembers).not.toHaveBeenCalled();
+    expect(prisma.ticket.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ assigneeId: undefined }) }));
+  });
+
+  it('auto-assigns a new ticket to whichever member currently has the fewest open tickets', async () => {
+    const { service, prisma, teamService } = makeService({ autoAssignEnabled: true });
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ text: 'I want a refund' }));
+    teamService.listMembers.mockResolvedValue([{ id: 'user-a' }, { id: 'user-b' }, { id: 'user-c' }]);
+    prisma.ticket.groupBy.mockResolvedValue([
+      { assigneeId: 'user-a', _count: { _all: 3 } },
+      { assigneeId: 'user-b', _count: { _all: 0 } },
+    ]);
+
+    await service.ingestEvent('event-1');
+
+    expect(prisma.ticket.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ workspaceId: 'ws-1', assigneeId: { not: null } }) }),
+    );
+    expect(prisma.ticket.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          assigneeId: 'user-b',
+          events: { create: expect.arrayContaining([expect.objectContaining({ type: 'ASSIGNED', data: { assigneeId: 'user-b', auto: true } })]) },
+        }),
+      }),
+    );
+  });
+
+  it('auto-assign is a no-op when the workspace has no team members', async () => {
+    const { service, prisma, teamService } = makeService({ autoAssignEnabled: true });
+    prisma.commentEvent.findUnique.mockResolvedValue(makeEvent({ text: 'I want a refund' }));
+    teamService.listMembers.mockResolvedValue([]);
+
+    await service.ingestEvent('event-1');
+
+    expect(prisma.ticket.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ assigneeId: undefined }) }));
   });
 
   it('does nothing when ticketing is switched off for the workspace', async () => {
@@ -420,7 +470,7 @@ describe('TicketsService.ingestTaggedPost', () => {
 
 describe('TicketsService.reply', () => {
   const user = { userId: 'user-1', workspaceId: 'ws-1', role: 'MEMBER', email: 'a@b.c' };
-  const ticket = { id: 'ticket-1', workspaceId: 'ws-1', instagramAccountId: 'acc-1', status: TicketStatus.OPEN, firstResponseAt: null };
+  const ticket = { id: 'ticket-1', workspaceId: 'ws-1', instagramAccountId: 'acc-1', status: TicketStatus.OPEN, firstResponseAt: null, assigneeId: 'user-2' };
 
   function setup(participant: Record<string, unknown>) {
     const ctx = makeService();
@@ -533,6 +583,76 @@ describe('TicketsService.reply', () => {
     ctx.prisma.ticketParticipant.findFirst.mockResolvedValue(null);
 
     await expect(ctx.service.reply('ws-1', user, 'ticket-1', { participantId: 'other', channel: 'DM', text: 'hi' })).rejects.toThrow(NotFoundAppException);
+  });
+
+  it('refuses a DM on an unassigned ticket, even when the DM window is otherwise open', async () => {
+    const ctx = makeService();
+    ctx.prisma.ticket.findFirst.mockResolvedValue({ ...ticket, assigneeId: null });
+    ctx.prisma.ticketParticipant.findFirst.mockResolvedValue({ id: 'part-1', ticketId: 'ticket-1', igScopedId: 'igsid-1', lastInboundAt: new Date() });
+
+    await expect(
+      ctx.service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi' }),
+    ).rejects.toThrow(AppException);
+    expect(ctx.messagingService.sendManual).not.toHaveBeenCalled();
+  });
+
+  it('allows a public reply on an unassigned ticket (only DM requires an assignee)', async () => {
+    const ctx = makeService();
+    ctx.prisma.ticket.findFirst.mockResolvedValue({ ...ticket, assigneeId: null });
+    ctx.prisma.ticketParticipant.findFirst.mockResolvedValue({ id: 'part-1', ticketId: 'ticket-1', igScopedId: 'igsid-1', latestCommentId: 'comment-9', latestCommentAt: new Date() });
+
+    await ctx.service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'PUBLIC_REPLY', text: 'Thanks for flagging' });
+
+    expect(ctx.messagingService.sendManual).toHaveBeenCalled();
+  });
+
+  it('renders merge tags in the reply text before sending', async () => {
+    const { service, prisma, messagingService, mergeTagsService } = setup({ lastInboundAt: new Date(), username: 'jane' });
+    mergeTagsService.render.mockResolvedValue('Hey Jane, sorry about that!');
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'Hey {{username}}, sorry about that!' });
+
+    expect(mergeTagsService.render).toHaveBeenCalledWith('Hey {{username}}, sorry about that!', {
+      workspaceId: 'ws-1',
+      instagramAccountId: 'acc-1',
+      igScopedId: 'igsid-1',
+      username: 'jane',
+    });
+    expect(messagingService.sendManual).toHaveBeenCalledWith(expect.objectContaining({ content: { text: 'Hey Jane, sorry about that!' } }));
+    expect(prisma.ticketMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ text: 'Hey Jane, sorry about that!' }) }),
+    );
+  });
+
+  it('quote-replies to a specific earlier message via reply_to.mid, resolved from the ticket message id', async () => {
+    const { service, prisma, messagingService } = setup({ lastInboundAt: new Date() });
+    prisma.ticketMessage.findFirst = jest.fn().mockResolvedValue({ externalId: 'mid-original-1' });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'following up', replyToMessageId: 'msg-original-1' });
+
+    expect(prisma.ticketMessage.findFirst).toHaveBeenCalledWith({ where: { id: 'msg-original-1', ticketId: 'ticket-1' }, select: { externalId: true } });
+    expect(messagingService.sendManual).toHaveBeenCalledWith(expect.objectContaining({ replyToMid: 'mid-original-1' }));
+    expect(prisma.ticketMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ replyToMessageId: 'msg-original-1' }) }),
+    );
+  });
+
+  it('404s a quote-reply to a message that is not on this ticket', async () => {
+    const { service, prisma } = setup({ lastInboundAt: new Date() });
+    prisma.ticketMessage.findFirst = jest.fn().mockResolvedValue(null);
+
+    await expect(
+      service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi', replyToMessageId: 'not-on-ticket' }),
+    ).rejects.toThrow(NotFoundAppException);
+  });
+
+  it('ignores a quote-reply target for a private reply (not a supported combination)', async () => {
+    const { service, prisma, messagingService } = setup({ latestCommentId: 'comment-9', latestCommentAt: new Date() });
+
+    await service.reply('ws-1', user, 'ticket-1', { participantId: 'part-1', channel: 'DM', text: 'hi', replyToMessageId: 'msg-x' });
+
+    expect(prisma.ticketMessage.findFirst).not.toHaveBeenCalled();
+    expect(messagingService.sendManual.mock.calls[0][0].replyToMid).toBeUndefined();
   });
 });
 

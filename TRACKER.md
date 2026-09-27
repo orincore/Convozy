@@ -2014,18 +2014,62 @@ exercised a realistic Meta timestamp value.
   full-width card (unbounded line length reads worse, not better) — "full
   width" was applied to reclaiming the wasted space, not to stretching text
   edge-to-edge.
-- ☐ **"Reply to a specific message" (quote-reply) — not built, confirmed
-  buildable.** User asked whether this exists; it doesn't (`TicketComposer`
-  only has DM/public-reply/note mode + participant selection, no per-message
-  reply target). Verified against Meta's own docs (not assumed): Instagram's
-  Send API genuinely supports it —
+- ✅ **"Reply to a specific message" (quote-reply), done.** Verified against
+  Meta's own docs (not assumed): Instagram's Send API supports
   `POST /{IG_ID}/messages` with `"reply_to": {"mid": "<MESSAGE_ID>"}`
   alongside the normal `recipient`/`message` body, for either a message the
-  business sent or one the user sent. This is a real, scoped feature to
-  build (composer UI to pick/clear a "replying to" target per message bubble,
-  `MessagingService`/reply DTO changes to carry `replyToMid`) — not attempted
-  yet, needs a scoping decision on how the UI should let someone pick a
-  target message before building it.
+  business sent or one the user sent.
+  - Migration `20260929020000_ticket_reply_saved_replies_autoassign`:
+    `TicketMessage.replyToMessageId` (self-relation `TicketMessageReply`,
+    `onDelete: SetNull`) — the *TicketMessage id*, not the raw Meta mid.
+  - `ReplyDto.replyToMessageId` (optional) → `TicketsService.reply()` looks
+    up that message on the same ticket, takes its `externalId` (the real
+    Meta mid) as `replyToMid`, and only when the send is DM-shaped and not a
+    private reply (Meta's Private Replies docs never show `reply_to` on that
+    shape) — silently ignored otherwise as defense in depth, since the
+    composer already only offers quote-reply in DM mode.
+    `MessagingService.callGraphApi` forwards `reply_to: { mid }` when set.
+  - Frontend: `ThreadItem` carries `id` (null for Instagram-history-only
+    bubbles, which have no `TicketMessage` row to target) and
+    `replyToMessage`; `ThreadView` shows a reply icon on hover for eligible
+    DM bubbles (`components/tickets/thread.tsx`) and a quoted-text strip on
+    any bubble that has one. `TicketComposer` shows a "Replying to ..." chip
+    above the textarea (clearable) and includes `replyToMessageId` on send,
+    only in DM mode. Wired into both `tickets/[id]/page.tsx` and
+    `tickets/[id]/chat/page.tsx`, clearing the target on participant switch
+    or after a successful send.
+- ✅ **Saved replies (canned responses), done.** New `SavedReply` model
+  (same migration as above), workspace-wide (not per Instagram account —
+  `SavedRepliesController` deliberately has no `AccountScopeGuard`).
+  `SavedRepliesService` (CRUD, unique title per workspace) +
+  `SavedRepliesController` (`/tickets/saved-replies`). Reuses
+  `MergeTagsService` (new, extracted from `AutomationsService`'s existing
+  `{{username}}`/`{{full_name}}`/`{{field.<key>}}` renderer — not
+  consolidated onto it yet, a known follow-up) so a saved reply's tags
+  render the same way an automation's would, applied to *every* manual
+  reply in `TicketsService.reply()`, not just saved-reply-sourced ones.
+  Frontend: management UI (create/edit/delete) added to
+  `/app/settings/tickets` below the existing ticket rules card; a "Saved
+  replies" picker (`DropdownMenu`) in `TicketComposer` inserts a reply's
+  text into the textarea.
+- ✅ **Ticket auto-assign, done.** `TicketSettings.autoAssignEnabled`
+  (default off — manual assignment unchanged). When on,
+  `TicketsService.pickVacantMember` assigns a newly created ticket to
+  whichever workspace member currently has the fewest open (non-closed)
+  tickets — "least loaded", not strict round robin; ties go to whoever
+  joined the workspace earliest. Toggle added to `/app/settings/tickets`.
+  **User-directed rule that shipped alongside this**: a ticket must have an
+  assignee before anyone can send a DM through it (`TICKET_UNASSIGNED`
+  error otherwise) — auto-assign exists specifically so that requirement
+  doesn't become a manual chore.
+- ✅ **Participant profile pictures, done.** `Contact.profilePictureUrl` /
+  `TicketParticipant.profilePictureUrl` (same migration), populated from
+  Meta's User Profile API alongside the existing name backfill
+  (`InstagramService.fetchSenderProfile`, cached — not refreshed on a
+  schedule, so a stale/expired picture URL is a known, accepted gap, not a
+  bug). Shown via `AvatarImage` (falls back to initials) in the chat header,
+  the People switcher, the ticket detail page's participant list, and
+  thread message bubbles.
 
 ## Risks / known unknowns
 

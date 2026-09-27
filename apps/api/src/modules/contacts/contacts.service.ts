@@ -48,6 +48,7 @@ export class ContactsService {
     igScopedId: string | null | undefined,
     username?: string | null,
     name?: string | null,
+    profilePictureUrl?: string | null,
   ): Promise<void> {
     if (!igScopedId) {
       return;
@@ -60,11 +61,13 @@ export class ContactsService {
         igScopedId,
         username: username ?? undefined,
         name: name ?? undefined,
+        profilePictureUrl: profilePictureUrl ?? undefined,
         lastInboundAt: new Date(),
       },
       update: {
         username: username ?? undefined,
         name: name ?? undefined,
+        profilePictureUrl: profilePictureUrl ?? undefined,
         lastInboundAt: new Date(),
       },
     });

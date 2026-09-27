@@ -16,4 +16,5 @@ export class UpdateTicketSettingsDto {
   @IsOptional() @IsBoolean() createFromStoryMentions?: boolean;
   @IsOptional() @IsBoolean() createFromReferrals?: boolean;
   @IsOptional() @IsBoolean() createFromTaggedPosts?: boolean;
+  @IsOptional() @IsBoolean() autoAssignEnabled?: boolean;
 }

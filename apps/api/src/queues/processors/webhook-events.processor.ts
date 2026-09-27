@@ -99,6 +99,7 @@ export class WebhookEventsProcessor extends WorkerHost {
     const isConversationSourced = data.source !== 'COMMENT' && data.source !== 'LIVE_COMMENT';
     let resolvedName: string | null = null;
     let resolvedUsername = isConversationSourced ? undefined : data.fromUsername;
+    let resolvedProfilePictureUrl: string | null = null;
     if (isConversationSourced && data.fromIgScopedId) {
       const existingContact = await this.contactsService
         .findByIgScopedId(account.workspaceId, data.instagramAccountId, data.fromIgScopedId)
@@ -106,17 +107,26 @@ export class WebhookEventsProcessor extends WorkerHost {
       if (existingContact?.name) {
         resolvedName = existingContact.name;
         resolvedUsername = existingContact.username ?? undefined;
+        resolvedProfilePictureUrl = existingContact.profilePictureUrl ?? null;
       } else {
         const profile = await this.instagramService
           .fetchSenderProfile(data.instagramAccountId, data.fromIgScopedId)
-          .catch(() => ({ name: null, username: null }));
+          .catch(() => ({ name: null, username: null, profilePictureUrl: null }));
         resolvedName = profile.name;
         resolvedUsername = profile.username ?? undefined;
+        resolvedProfilePictureUrl = profile.profilePictureUrl;
       }
     }
 
     await this.contactsService
-      .recordInbound(account.workspaceId, data.instagramAccountId, data.fromIgScopedId, resolvedUsername, resolvedName)
+      .recordInbound(
+        account.workspaceId,
+        data.instagramAccountId,
+        data.fromIgScopedId,
+        resolvedUsername,
+        resolvedName,
+        resolvedProfilePictureUrl,
+      )
       .catch((err) => {
         this.logger.error(`Contact tracking failed for event ${data.externalEventId}: ${(err as Error).message}`);
       });

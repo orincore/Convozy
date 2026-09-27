@@ -59,7 +59,7 @@ function makeContactsService() {
 }
 
 function makeInstagramService() {
-  return { fetchSenderProfile: jest.fn().mockResolvedValue({ name: null, username: null }) } as any;
+  return { fetchSenderProfile: jest.fn().mockResolvedValue({ name: null, username: null, profilePictureUrl: null }) } as any;
 }
 
 function makeJob(data: Partial<WebhookEventJobData> = {}) {
@@ -139,6 +139,7 @@ describe('WebhookEventsProcessor', () => {
       'ig-scoped-1',
       'viewer123',
       null,
+      null,
     );
   });
 
@@ -155,10 +156,10 @@ describe('WebhookEventsProcessor', () => {
       makeJob({ source: 'STORY_REPLY', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }),
     );
 
-    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', undefined, null);
+    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', undefined, null, null);
   });
 
-  it('resolves a DM sender\'s real name/username via the Graph API when no Contact exists yet', async () => {
+  it('resolves a DM sender\'s real name/username/profile picture via the Graph API when no Contact exists yet', async () => {
     const prisma = {
       instagramAccount: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'workspace-1' }) },
       commentEvent: { create: jest.fn().mockResolvedValue({ id: 'comment-event-1' }) },
@@ -166,30 +167,44 @@ describe('WebhookEventsProcessor', () => {
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
     const instagramService = makeInstagramService();
-    instagramService.fetchSenderProfile.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe' });
+    instagramService.fetchSenderProfile.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe', profilePictureUrl: 'https://example.com/jane.jpg' });
 
     const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), instagramService, queue);
     await processor.process(makeJob({ source: 'DM', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }));
 
     expect(instagramService.fetchSenderProfile).toHaveBeenCalledWith('ig-account-1', 'ig-scoped-1');
-    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', 'jane.doe', 'Jane Doe');
+    expect(contactsService.recordInbound).toHaveBeenCalledWith(
+      'workspace-1',
+      'ig-account-1',
+      'ig-scoped-1',
+      'jane.doe',
+      'Jane Doe',
+      'https://example.com/jane.jpg',
+    );
   });
 
-  it('reuses an already-cached Contact name instead of calling the Graph API again', async () => {
+  it('reuses an already-cached Contact name/picture instead of calling the Graph API again', async () => {
     const prisma = {
       instagramAccount: { findUnique: jest.fn().mockResolvedValue({ workspaceId: 'workspace-1' }) },
       commentEvent: { create: jest.fn().mockResolvedValue({ id: 'comment-event-1' }) },
     } as any;
     const queue = { add: jest.fn() } as any;
     const contactsService = makeContactsService();
-    contactsService.findByIgScopedId.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe' });
+    contactsService.findByIgScopedId.mockResolvedValue({ name: 'Jane Doe', username: 'jane.doe', profilePictureUrl: 'https://example.com/jane.jpg' });
     const instagramService = makeInstagramService();
 
     const processor = new WebhookEventsProcessor(prisma, contactsService, makeTicketsService(), instagramService, queue);
     await processor.process(makeJob({ source: 'DM', fromIgScopedId: 'ig-scoped-1', fromUsername: 'ig-scoped-1' }));
 
     expect(instagramService.fetchSenderProfile).not.toHaveBeenCalled();
-    expect(contactsService.recordInbound).toHaveBeenCalledWith('workspace-1', 'ig-account-1', 'ig-scoped-1', 'jane.doe', 'Jane Doe');
+    expect(contactsService.recordInbound).toHaveBeenCalledWith(
+      'workspace-1',
+      'ig-account-1',
+      'ig-scoped-1',
+      'jane.doe',
+      'Jane Doe',
+      'https://example.com/jane.jpg',
+    );
   });
 
   it('never lets a Contact-tracking failure block automation matching (non-fatal)', async () => {
