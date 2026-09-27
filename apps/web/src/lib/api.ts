@@ -138,7 +138,6 @@ export const instagramApi = {
   listAccounts: () => authFetch<ConnectedAccount[]>('/instagram/accounts'),
   startOAuth: () => authFetch<{ url: string }>('/instagram/oauth/start'),
   listMedia: (accountId: string) => authFetch<RecentMediaItem[]>(`/instagram/accounts/${accountId}/media`),
-  listStories: (accountId: string) => authFetch<RecentMediaItem[]>(`/instagram/accounts/${accountId}/stories`),
   syncProfile: (accountId: string) =>
     authFetch<ConnectedAccount>(`/instagram/accounts/${accountId}/sync-profile`, { method: 'POST' }),
   disconnect: (accountId: string) => authFetch<void>(`/instagram/accounts/${accountId}`, { method: 'DELETE' }),

@@ -151,11 +151,17 @@ function scopeKindOf(scopeType: AutomationScopeType): 'post' | 'story' {
   return scopeType === 'ALL_STORIES' || scopeType === 'SPECIFIC_STORIES' ? 'story' : 'post';
 }
 
+/** SPECIFIC_STORIES is no longer offered in the builder (see SCOPE_OPTIONS) —
+ * an automation saved with it before that change is treated as ALL_STORIES. */
+function normalizeScopeType(scopeType: AutomationScopeType): AutomationScopeType {
+  return scopeType === 'SPECIFIC_STORIES' ? 'ALL_STORIES' : scopeType;
+}
+
 const SCOPE_OPTIONS: {
   kind: 'post' | 'story';
   groupLabel: string;
   all: { value: AutomationScopeType; title: string; hint: string };
-  specific: { value: AutomationScopeType; title: string; hint: string };
+  specific: { value: AutomationScopeType; title: string; hint: string } | null;
 }[] = [
   {
     kind: 'post',
@@ -166,12 +172,15 @@ const SCOPE_OPTIONS: {
   {
     kind: 'story',
     groupLabel: 'Stories',
-    all: { value: 'ALL_STORIES', title: 'All stories', hint: 'Watch replies to every story you post' },
-    specific: {
-      value: 'SPECIFIC_STORIES',
-      title: 'Specific story',
-      hint: 'Pick from stories that have already gotten a reply — Instagram doesn’t let apps list your active stories directly',
-    },
+    // No "specific story" option: Meta doesn't let this app's login type
+    // (Instagram Login, graph.instagram.com) list a Business account's
+    // active stories via the Graph API at all — verified live 2026-09-27
+    // (see TRACKER.md). A picker sourced from our own webhook log was tried
+    // and shipped, but still only ever shows stories that already got a
+    // reply, which isn't useful enough to keep as a real option — dropped
+    // rather than left as a confusing, mostly-empty picker.
+    all: { value: 'ALL_STORIES', title: 'Stories', hint: 'Watch replies to every story you post' },
+    specific: null,
   },
 ];
 
@@ -190,8 +199,8 @@ function ScopePicker({
 }) {
   const [media, setMedia] = useState<RecentMediaItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const kind = scopeKindOf(scopeType);
-  const isSpecific = scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES';
+  // Only posts have a "specific" picker — stories don't (see SCOPE_OPTIONS).
+  const isSpecific = scopeType === 'SPECIFIC_POSTS';
 
   // Resetting local state before an async fetch triggered by a prop change
   // is the standard pattern here (same justified case as AuthGuard) — the
@@ -203,11 +212,11 @@ function ScopePicker({
     if (!isSpecific || !accountId) return;
     setMedia(null);
     setError(null);
-    const fetcher = kind === 'story' ? instagramApi.listStories : instagramApi.listMedia;
-    fetcher(accountId)
+    instagramApi
+      .listMedia(accountId)
       .then(setMedia)
       .catch((err: ApiError) => setError(err.message));
-  }, [accountId, isSpecific, kind]);
+  }, [accountId, isSpecific]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
@@ -227,7 +236,7 @@ function ScopePicker({
         {SCOPE_OPTIONS.map((group) => (
           <div key={group.kind} className="flex flex-col gap-2">
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{group.groupLabel}</span>
-            {[group.all, group.specific].map((opt) => (
+            {[group.all, group.specific].filter((opt): opt is NonNullable<typeof opt> => opt !== null).map((opt) => (
               <label
                 key={opt.value}
                 htmlFor={`scope-${opt.value}`}
@@ -258,13 +267,7 @@ function ScopePicker({
               <CircleNotch size={18} className="animate-spin text-muted-foreground" />
             </div>
           )}
-          {media && media.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              {kind === 'story'
-                ? 'No story replies yet on this account. This list fills in once someone actually replies to a story — Meta doesn’t let apps browse your active stories directly. Use "All stories" until then.'
-                : 'No recent posts found on this account.'}
-            </p>
-          )}
+          {media && media.length === 0 && <p className="text-xs text-muted-foreground">No recent posts found on this account.</p>}
           {media && media.length > 0 && (
             <>
               <p className="mb-2 text-xs text-muted-foreground">
@@ -385,7 +388,7 @@ function readDraft(automation: Automation | undefined): DraftData | null {
     name: typeof d.name === 'string' ? d.name : '',
     scopeType:
       d.scopeType === 'SPECIFIC_POSTS' || d.scopeType === 'ALL_STORIES' || d.scopeType === 'SPECIFIC_STORIES'
-        ? d.scopeType
+        ? normalizeScopeType(d.scopeType)
         : 'ALL_POSTS',
     selectedMediaIds: Array.isArray(d.selectedMediaIds) ? d.selectedMediaIds : [],
     triggers: d.triggers,
@@ -425,7 +428,9 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
   const [actionSteps, setActionSteps] = useState<ActionStepNode[]>(
     restored?.actionSteps ?? (isEdit ? deserializeActionSteps(automation.actions) : [emptyActionStep()]),
   );
-  const [scopeType, setScopeType] = useState<AutomationScopeType>(restored?.scopeType ?? automation?.scopeType ?? 'ALL_POSTS');
+  const [scopeType, setScopeType] = useState<AutomationScopeType>(
+    normalizeScopeType(restored?.scopeType ?? automation?.scopeType ?? 'ALL_POSTS'),
+  );
   const [selectedMediaIds, setSelectedMediaIds] = useState<string[]>(restored?.selectedMediaIds ?? automation?.scopeMediaIds ?? []);
   const [templatesOpen, setTemplatesOpen] = useState(!isEdit && automation === undefined);
   const [step, setStep] = useState<WizardStep>(restored?.step ?? 'posts');
@@ -609,9 +614,6 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (scopeType === 'SPECIFIC_POSTS' && selectedMediaIds.length === 0) {
       return 'Pick at least one post, or switch to "All posts".';
     }
-    if (scopeType === 'SPECIFIC_STORIES' && selectedMediaIds.length === 0) {
-      return 'Pick a story, or switch to "All stories".';
-    }
     return null;
   }
 
@@ -627,7 +629,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (scopeType === 'SPECIFIC_POSTS' && triggers.every((t) => CONVERSATION_ONLY_SOURCES.includes(t.source))) {
       return 'DMs, story replies, story mentions and link clicks aren’t tied to a specific post. Go back and choose "All posts", or add a comment trigger too.';
     }
-    if ((scopeType === 'ALL_STORIES' || scopeType === 'SPECIFIC_STORIES') && !triggers.some((t) => t.source === 'STORY_REPLY')) {
+    if (scopeType === 'ALL_STORIES' && !triggers.some((t) => t.source === 'STORY_REPLY')) {
       return 'A story scope needs a "Story reply" trigger. Go back and choose "Posts & reels" instead, or add a story reply trigger.';
     }
     return null;
@@ -699,7 +701,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
         await automationsApi.update(automation.id, {
           name: name.trim() || 'Untitled automation',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : [],
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : [],
           triggers: triggerInputs,
           actions: actionInputs,
         });
@@ -709,7 +711,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           name: name.trim() || 'Untitled automation',
           status: 'ACTIVE',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : [],
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : [],
           triggers: triggerInputs,
           actions: actionInputs,
         });
@@ -719,7 +721,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           instagramAccountId: accountId,
           status: 'ACTIVE',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : undefined,
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : undefined,
           triggers: triggerInputs,
           actions: actionInputs,
         };
@@ -943,7 +945,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
                 <dd className="mt-0.5 font-medium">
                   {scopeType === 'ALL_POSTS' && 'All posts and reels'}
                   {scopeType === 'ALL_STORIES' && 'Every story'}
-                  {(scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES') && `${selectedMediaIds.length} selected`}
+                  {scopeType === 'SPECIFIC_POSTS' && `${selectedMediaIds.length} selected`}
                 </dd>
               </div>
               <div>

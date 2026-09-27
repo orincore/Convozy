@@ -1872,6 +1872,22 @@ Status: built and unit-tested, applied to the local database, **not deployed**
       documented and visible to the user, not silently half-working.
     - Tests added: `instagram.service.spec.ts` `listRecentStories` (distinct
       media IDs, most-recent-first, never touches `global.fetch`).
+    - **Reverted further, same day, user's call**: even the CommentEvent-backed
+      "Specific story" picker wasn't good enough in practice (still mostly
+      empty — it can only ever list stories that already got a reply, so a
+      fresh story never appears). User: "then only keep stories option which
+      will be considered as all stories." `SPECIFIC_STORIES` is no longer
+      offered in the builder at all — `SCOPE_OPTIONS`'s story entry has only
+      "Stories" (`ALL_STORIES`), no specific sub-option. An automation saved
+      with `SPECIFIC_STORIES` from the brief window it existed is normalized
+      to `ALL_STORIES` on load (`normalizeScopeType`). `instagramApi.listStories`
+      (frontend) removed as dead code. **Backend** (`SPECIFIC_STORIES` enum
+      value, `listRecentStories()`, `GET /instagram/accounts/:id/stories`,
+      `validateScope`'s handling of it) deliberately left in place rather
+      than torn out same-day — removing a Postgres enum value needs
+      recreating the type, disproportionate churn for a feature that shipped
+      and was reverted within the same session; it's simply unreachable from
+      the UI now. Revisit/remove for real if this stays unused.
   - **User's second ask, same thread**: the "Choose posts" step should
     *declare* posts vs. stories, and the Build-automation step's trigger
     Source should update to match automatically, in both directions. Built
