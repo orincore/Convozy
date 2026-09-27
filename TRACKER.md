@@ -356,15 +356,14 @@ partnership claimed) via AskUserQuestion.
   planned. Follow-to-DM and Shopify/white-label deliberately omitted (no
   Meta endpoint / out of scope). Visuals adapt Spectrum patterns (streaming
   text, stepper, swipe-to-hide, bell, sparkline, toast stack). Not deployed.
-- ✅ **Meta Tech Provider status shown** (2026-09-24): the owner confirmed
-  Convozy was approved as a Meta Tech Provider and is live with users, so the
-  homepage now has a large centered "Official Meta Business Partner" statement (owner
-  explicitly chose this wording over "Tech Provider")
-  with the Meta and Instagram marks (supersedes the earlier "Built on"
-  wording, which existed because no approval was recorded here). Recorded from
-  the owner's word, not verified in the Meta dashboard. "Tech Provider" is the
-  program named; the separate "Meta Business Partner" badge would need its own
-  confirmation.
+- ✅ **Meta Business Partner status shown** (2026-09-24, confirmed 2026-09-27):
+  the owner confirmed Convozy holds Official Meta Business Partner status, so
+  the homepage has a large centered "Official Meta Business Partner"
+  statement with the Meta and Instagram marks (supersedes the earlier "Built
+  on" wording, which existed because no approval was recorded here). An SEO
+  audit on 2026-09-27 flagged this claim as unverified against this file's
+  earlier note ("not verified in the Meta dashboard") - the owner has since
+  confirmed it directly, so that caveat no longer applies.
 - ✅ **Homepage rebalanced so no single feature dominates** (2026-09-24):
   the comment-to-DM demo pair (`LiveDemo` + `ActivityFeed`, now equal height)
   moved to `/features/comment-to-dm`. Homepage order: hero, Meta partner,
