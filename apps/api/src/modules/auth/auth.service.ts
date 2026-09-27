@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/configuration';
-import { ConflictAppException, NotFoundAppException } from '../../common/utils/app-exception';
+import { ConflictAppException, ForbiddenAppException, NotFoundAppException } from '../../common/utils/app-exception';
 import { hashInviteToken } from '../../common/utils/invite-token.util';
 import { REDIS_CLIENT } from '../../redis/redis.module';
 import { EntitlementsService } from '../billing/entitlements.service';
@@ -110,6 +110,9 @@ export class AuthService {
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid email or password');
     }
+    if (user.isSuspended) {
+      throw new ForbiddenAppException('ACCOUNT_SUSPENDED', 'This account has been suspended. Contact support.');
+    }
 
     return this.issueTokens(user.id, user.workspaceId, user.role, user.email);
   }
@@ -121,9 +124,15 @@ export class AuthService {
    */
   async loginOrRegisterWithGoogle(profile: GoogleProfile): Promise<AuthTokens> {
     let user = await this.prisma.user.findUnique({ where: { googleId: profile.googleId } });
+    if (user?.isSuspended) {
+      throw new ForbiddenAppException('ACCOUNT_SUSPENDED', 'This account has been suspended. Contact support.');
+    }
 
     if (!user) {
       const existingByEmail = await this.prisma.user.findUnique({ where: { email: profile.email } });
+      if (existingByEmail?.isSuspended) {
+        throw new ForbiddenAppException('ACCOUNT_SUSPENDED', 'This account has been suspended. Contact support.');
+      }
       if (existingByEmail) {
         user = await this.prisma.user.update({
           where: { id: existingByEmail.id },
@@ -237,6 +246,9 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
+    }
+    if (user.isSuspended) {
+      throw new ForbiddenAppException('ACCOUNT_SUSPENDED', 'This account has been suspended. Contact support.');
     }
 
     return this.issueTokens(user.id, user.workspaceId, user.role, user.email);

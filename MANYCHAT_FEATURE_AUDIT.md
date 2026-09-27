@@ -68,7 +68,7 @@ Sources: [ManyChat FAQ 2026](https://community.manychat.com/general-q-a-43/manyc
 | Comment → DM automation (keyword-triggered) | ✅ Free | — | Convozy already has this (Phase 2) |
 | Post-level scoping (choose which posts trigger) | ✅ Free | — | Convozy already has this |
 | Story reply automation | ✅ Free | — | Convozy already has this |
-| Live comment automation | ✅ Free | — | Convozy: not yet built |
+| Live comment automation | ✅ Free | — | Convozy already has this (Phase 5.1) — see TRACKER.md |
 | "Comments Growth Tool" (auto-follow-back / grow followers from comments) | ✅ Free | — | Convozy: not built |
 | Follow to DM ("say hi to new followers") | ✅ Free (Beta, needs ~1,000+ followers to be eligible) | — | Distinct from comment automation — triggers on a *new follow* event, not a comment. Requires Meta eligibility, not just a ManyChat tier |
 | Require-follow gating before replying | Free | — | Gate a flow behind "must follow the account first" |

@@ -29,6 +29,12 @@ export const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
 
+  // Platform-admin panel auth — deliberately its own secret, never the
+  // customer JWT_SECRET, so an admin token can never be accepted by a
+  // customer-facing route or vice versa (CLAUDE.md §12/admin, 2026-09-27).
+  ADMIN_JWT_SECRET: z.string().min(32, 'ADMIN_JWT_SECRET must be at least 32 characters'),
+  ADMIN_JWT_TTL: z.string().default('12h'),
+
   // Encryption for Instagram access tokens at rest (CLAUDE.md §5)
   TOKEN_ENCRYPTION_KEY: z
     .string()

@@ -226,6 +226,14 @@ export class MessagingService {
         // primary check.
         throw new Error('REPLY_COMMENT requires a comment-sourced event, not a conversation-sourced one');
       }
+      // Same endpoint for a COMMENT- and a LIVE_COMMENT-sourced id. Verified
+      // against Meta's Webhooks Reference (developers.facebook.com/docs/
+      // graph-api/webhooks/reference/instagram): the `live_comments` field's
+      // payload "mirrors the `comments` field structure identically" and
+      // Meta's Comment Moderation doc draws no distinction for live-video
+      // comment ids — the only live-specific note in either doc is to expect
+      // higher webhook volume during a live broadcast, not a different
+      // reply/hide contract. No separate branch needed here.
       const text = (data.content as unknown as ActionContent).text;
       return this.postGraphApi(`${data.recipientId}/replies`, { message: text }, credentials.accessToken, version);
     }
@@ -236,7 +244,8 @@ export class MessagingService {
       }
       // Comment Moderation: POST /<IG_COMMENT_ID>?hide=true — a query
       // param, not a JSON body field (confirmed against Meta's current
-      // ig-comment reference docs). No text content of its own.
+      // ig-comment reference docs). No text content of its own. Same
+      // COMMENT-vs-LIVE_COMMENT parity note as REPLY_COMMENT above applies.
       return this.postGraphApi(`${data.recipientId}?hide=true`, {}, credentials.accessToken, version);
     }
 

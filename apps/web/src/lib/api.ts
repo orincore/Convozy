@@ -138,6 +138,7 @@ export const instagramApi = {
   listAccounts: () => authFetch<ConnectedAccount[]>('/instagram/accounts'),
   startOAuth: () => authFetch<{ url: string }>('/instagram/oauth/start'),
   listMedia: (accountId: string) => authFetch<RecentMediaItem[]>(`/instagram/accounts/${accountId}/media`),
+  listStories: (accountId: string) => authFetch<RecentMediaItem[]>(`/instagram/accounts/${accountId}/stories`),
   syncProfile: (accountId: string) =>
     authFetch<ConnectedAccount>(`/instagram/accounts/${accountId}/sync-profile`, { method: 'POST' }),
   disconnect: (accountId: string) => authFetch<void>(`/instagram/accounts/${accountId}`, { method: 'DELETE' }),
@@ -168,7 +169,7 @@ export type TriggerSource = 'COMMENT' | 'DM' | 'STORY_REPLY' | 'LIVE_COMMENT' | 
 export type TriggerMatchType = 'EXACT' | 'CONTAINS' | 'REGEX' | 'AI_INTENT';
 export type ActionType = 'SEND_DM' | 'REPLY_COMMENT' | 'SEND_AI_REPLY' | 'CONDITION' | 'HIDE_COMMENT';
 export type AutomationStatus = 'ACTIVE' | 'PAUSED' | 'DRAFT';
-export type AutomationScopeType = 'ALL_POSTS' | 'SPECIFIC_POSTS';
+export type AutomationScopeType = 'ALL_POSTS' | 'SPECIFIC_POSTS' | 'ALL_STORIES' | 'SPECIFIC_STORIES';
 export type ActionBranch = 'THEN' | 'ELSE';
 export type ConditionField = 'COMMENT_TEXT' | 'SENDER_USERNAME';
 

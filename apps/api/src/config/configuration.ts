@@ -22,6 +22,10 @@ export interface AppConfig {
     accessTtl: string;
     refreshTtl: string;
   };
+  adminJwt: {
+    secret: string;
+    ttl: string;
+  };
   security: {
     tokenEncryptionKey: string;
   };
@@ -92,6 +96,10 @@ export default function configuration(): AppConfig {
       secret: env.JWT_SECRET,
       accessTtl: env.JWT_ACCESS_TTL,
       refreshTtl: env.JWT_REFRESH_TTL,
+    },
+    adminJwt: {
+      secret: env.ADMIN_JWT_SECRET,
+      ttl: env.ADMIN_JWT_TTL,
     },
     security: {
       tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,

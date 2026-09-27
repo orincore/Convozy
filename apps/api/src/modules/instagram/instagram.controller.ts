@@ -81,6 +81,15 @@ export class InstagramController {
     return this.instagramService.listRecentMedia(id);
   }
 
+  /** Active stories for the "specific story" story-reply automation scope picker. */
+  @Get('accounts/:id/stories')
+  async listStories(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    if (!(await this.instagramService.accountBelongsToWorkspace(id, user.workspaceId))) {
+      throw new NotFoundAppException('INSTAGRAM_ACCOUNT_NOT_FOUND', 'This Instagram account was not found in your workspace.');
+    }
+    return this.instagramService.listRecentStories(id);
+  }
+
   /**
    * On-demand refresh of the cached profile preview (name/picture/follower
    * count) shown on the Accounts page — the only user-triggerable path that

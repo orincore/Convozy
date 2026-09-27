@@ -932,7 +932,7 @@ feature later via data, not code.
     extended `auth.service.spec.ts`'s mock helper. Full suite verified green:
     `npx jest` 90/90, `npx tsc --noEmit` clean, `pnpm run lint` 0 errors
     (108 pre-existing `any` warnings in test files, none new).
-- ▶ **Live Comment Automation** (first real feature gated through the
+- ✅ **Live Comment Automation** (first real feature gated through the
   system): `instagram.service.ts`'s `WEBHOOK_SUBSCRIBED_FIELDS` changed
   `'comments,messages'` → `'comments,live_comments,messages'` — confirmed
   `live_comments` is current/correct against Meta's live docs (both the
@@ -943,12 +943,46 @@ feature later via data, not code.
   asserts the subscribe call's `subscribed_fields` param includes it.
   Frontend already had "Live comment" as a selectable trigger source
   (Phase 4) — this was the only missing wiring.
+  - ✅ **2026-09-27 audit closed three remaining gaps** (a research pass
+    found LIVE_COMMENT was wired through webhook→match→dispatch correctly
+    but under-verified/under-tested; this is the fix-up):
+    1. **Stale-subscription bug already fixed, just undocumented.**
+       `InstagramService.syncProfile` re-runs `subscribeToWebhooks` for the
+       account's *current* `WEBHOOK_SUBSCRIBED_FIELDS` every time it's
+       called (idempotent on Meta's side), and `TokenRefreshProcessor` calls
+       `refreshAccountToken` → `syncProfile` on an hourly BullMQ repeatable
+       job (`token-refresh.processor.ts`) for every account within its
+       renewal window — so an account connected before `live_comments`
+       existed gets silently re-subscribed the next time its token comes up
+       for renewal (at most ~53 days later, since long-lived tokens are
+       ~60 days and the renewal window is the last 7), no manual reconnect
+       needed. The "still needed: ask the user to reconnect" note below was
+       stale as of this audit — removed.
+    2. **Verified Meta draws no COMMENT vs LIVE_COMMENT distinction for
+       reply/hide.** Checked developers.facebook.com/docs/graph-api/webhooks/
+       reference/instagram (the `live_comments` field "mirrors the `comments`
+       field structure identically," and the only live-specific note in
+       either that page or developers.facebook.com/docs/instagram-platform/
+       comment-moderation/ is to expect higher webhook volume during a live
+       broadcast — not a different reply/hide contract). So
+       `MessagingService.callGraphApi`'s shared `/{comment_id}/replies` and
+       `/{comment_id}?hide=true` calls for both sources were already
+       correct; added citation comments at the call sites
+       (`messaging.service.ts`) instead of a needless branch.
+    3. **Closed the test-coverage gap**: added a `comments` vs `live_comments`
+       field-routing test to `webhooks.controller.spec.ts`, and three
+       LIVE_COMMENT-sourced end-to-end tests to `automations.service.spec.ts`
+       (REPLY_COMMENT → `recipientType: 'comment'`, HIDE_COMMENT, and
+       SEND_DM-as-private-reply keyed off the comment id) — previously only
+       entitlement-gating tests touched LIVE_COMMENT. Full suite green:
+       `npx jest webhooks.controller.spec.ts automations.service.spec.ts
+       messaging.service.spec.ts instagram.service.spec.ts` — 155/155.
+    - Also fixed a stale line in `MANYCHAT_FEATURE_AUDIT.md` (said "Live
+      comment automation ... not yet built", which hadn't been true since
+      this Phase 5.1 entry shipped 2026-09-24).
 - ☐ **Automation templates still not started** — now Milestone 3 of the
   full feature-parity plan below, not built yet.
 - ✅ Deployed 2026-09-24 (see Phase 5.2's deploy notes for the mechanics).
-  **Still needed**: ask the user to **reconnect their test Instagram
-  account** (`subscribeToWebhooks` only re-subscribes at connect time, so
-  an already-connected account won't pick up `live_comments` otherwise).
 
 ---
 
@@ -1720,6 +1754,116 @@ Status: built and unit-tested, applied to the local database, **not deployed**
 - ☐ Error tracking (Sentry or equivalent)
 - ☐ Load test the webhook → send pipeline at target concurrency
 - ☐ Runbooks for on-call scenarios (DLQ growth, account throttled, DB failover)
+
+## Phase 4.x — Platform admin panel (added 2026-09-27, user-requested)
+
+- ✅ **Done and verified live locally 2026-09-27.** User asked, "side by side"
+  with the story/live-comment fix below, for an admin panel to see/manage
+  users on the app. Not a `TRACKER.md`-scheduled item before this — pulled
+  forward at the user's request, same as the activity feed was in Phase 4.
+  - **Deliberately its own credential space, not `UserRole`.** `UserRole`
+    (OWNER/ADMIN/MEMBER) is workspace-scoped — a workspace's own ADMIN must
+    never see another workspace's users, so reusing it for "see every user
+    on the platform" would be a straight A01 broken-access-control bug. User
+    chose (asked directly): a brand new `AdminUser` table/login, completely
+    separate from the customer `User` table and from `JWT_SECRET` — see
+    `ADMIN_JWT_SECRET`/`ADMIN_JWT_TTL` in `.env`/`configuration.ts`.
+  - New `apps/api/src/modules/admin` module: `AdminAuthController`
+    (`POST /admin/auth/login`), `AdminUsersController`
+    (`GET /admin/users`, `GET /admin/users/:id`,
+    `PATCH /admin/users/:id/suspend`), own `AdminJwtStrategy`
+    (passport strategy name `admin-jwt`, verified only against
+    `ADMIN_JWT_SECRET`) and `AdminRolesGuard`/`@AdminRoles()` (`SUPERADMIN` /
+    `SUPPORT`) mirroring the customer `RolesGuard` pattern. All admin routes
+    are `@Public()` (opt out of the global customer `JwtAuthGuard`) and
+    re-authenticate explicitly via `AuthGuard('admin-jwt')` instead — a
+    customer token can never authenticate here and vice versa.
+  - Schema: `AdminUser`, `AdminRole` enum, `AdminAuditLog` (every
+    suspend/unsuspend is written here with the acting admin's ID), and
+    `User.isSuspended`/`User.suspendedAt`. All additive — migration
+    `20260927134746_admin_panel_and_story_scope`.
+  - Suspending a user (SUPERADMIN-only; SUPPORT can view but not act) blocks
+    password login, Google login (both the existing-user and
+    link-by-email paths), and refresh-token rotation in `auth.service.ts` —
+    verified live: a suspended user with the *correct* password gets
+    `ACCOUNT_SUSPENDED` (403), not the generic invalid-credentials message
+    (that generic message is still what a *wrong* password gets, so this
+    doesn't create a new user-enumeration channel — CLAUDE.md §5a A07).
+  - No self-service admin registration exists on purpose — the only way to
+    create/update an `AdminUser` is
+    `apps/api/scripts/create-admin-user.ts` (a `ts-node` CLI, upserts by
+    email, bcrypt-hashes the password). First superadmin created locally
+    2026-09-27 (`admin@convozy.orincore.com`, password left as the CLI's
+    placeholder — **user should change it before this ships anywhere real**).
+  - Frontend: `apps/web/src/app/admin/*` (own route group, own
+    `AdminAuthGuard`/`localStorage` token key `convozy_admin_token`, entirely
+    separate from the customer dashboard's `AuthGuard`/token) —
+    `/admin/login`, `/admin/users` (search + pagination), `/admin/users/:id`
+    (workspace/IG-accounts/automations/plan summary + suspend/unsuspend,
+    suspend button hidden client-side for a SUPPORT admin, re-enforced
+    server-side regardless).
+  - Verified end-to-end against the real local dev DB (not just unit tests):
+    login, list, detail, suspend blocking login with the right error code,
+    unsuspend, and a SUPPORT admin correctly getting 403 on suspend while
+    still able to list/view. Backend: `admin-auth.service.spec.ts`,
+    `admin-users.service.spec.ts` (7 tests, all passing).
+  - **Known gap, not silently shipped**: the admin login endpoint has no
+    rate limiting. CLAUDE.md §5/§5a A07 calls for rate-limiting login
+    endpoints, and this one is a higher-value brute-force target than the
+    customer login (a compromised admin login exposes every workspace's
+    users). The customer `/auth/login` endpoint *also* has no rate limiting
+    today — there is no `@nestjs/throttler` (or equivalent) wired into this
+    codebase at all yet, so this is a pre-existing gap this work didn't
+    introduce, but didn't close either. Flagged here rather than left
+    silent; fixing it properly means adding throttling consistently to both
+    login surfaces, not just the new one.
+
+## Phase 4.y — Story-reply automation scope: "all stories" vs "specific story" (added 2026-09-27, user-reported gap)
+
+- ✅ **Done, tested, verified live 2026-09-27.** User noticed mid-build: the
+  "Choose posts" automation-builder step only ever offered "all posts /
+  specific posts" — there was no way to scope a story-reply automation to
+  one particular story, the way a comment automation can be scoped to one
+  particular post. Root cause was two-layered: (1) `AutomationScopeType`
+  only had `ALL_POSTS`/`SPECIFIC_POSTS` in the schema, and (2) even if it
+  had a story option, the webhook mapping for `STORY_REPLY` events
+  (`webhooks.controller.ts`'s `mapMessagingEventToJobData`) was dropping
+  `reply_to.story.id` entirely — a `CommentEvent` for a story reply never
+  carried *which* story it was about, so nothing could have scoped to it.
+  - Schema: `AutomationScopeType` gained `ALL_STORIES`/`SPECIFIC_STORIES`;
+    `Automation.scopeMediaIds` is now documented as holding either post IDs
+    or story IDs depending on `scopeType` (same field, not duplicated).
+  - `webhooks.controller.ts`: `STORY_REPLY` events now set
+    `mediaId: message.reply_to.story.id`.
+  - `automations.service.ts`: `automationMatches` scope-check now covers
+    `SPECIFIC_STORIES` the same way it already covered `SPECIFIC_POSTS`; new
+    `validateScope()` rejects a story scope without a `STORY_REPLY` trigger
+    and a post scope without a `COMMENT`/`LIVE_COMMENT` trigger, server-side,
+    on both `create()` and `update()` — CLAUDE.md §5a A03/A04, the client
+    already keeps these in sync but the server never trusts that it did.
+  - `instagram.service.ts`/`instagram.controller.ts`: new
+    `listRecentStories()` / `GET /instagram/accounts/:id/stories`, hitting
+    Meta's `GET /{ig-user-id}/stories` (confirmed via Meta's IG User
+    reference docs, 2026-09-27 — a real, documented endpoint, distinct from
+    the regular `/media` endpoint; only currently-active (≤24h) stories are
+    returned, so a `SPECIFIC_STORIES` automation scoped to an expired story
+    simply stops matching rather than erroring).
+  - **User's second ask, same thread**: the "Choose posts" step should
+    *declare* posts vs. stories, and the Build-automation step's trigger
+    Source should update to match automatically, in both directions. Built
+    as `ScopePicker` (renamed from `PostPicker`) with two radio-groups
+    (Posts & reels / Stories) — picking either bucket now rewrites any
+    `COMMENT`/`LIVE_COMMENT`↔`STORY_REPLY` trigger sources to match
+    (`syncTriggerSourcesToScope`), and picking `STORY_REPLY`/`COMMENT`/
+    `LIVE_COMMENT` directly on a trigger row in Build automation flips the
+    scope bucket the other way (`updateTrigger`'s own sync) — CLAUDE.md
+    §14, a feature isn't "done" on the happy path alone if the two steps
+    it spans can silently disagree.
+  - Tests: `automations.service.spec.ts` (`matchCommentEvent` SPECIFIC_STORIES
+    scoping, plus a new `write-time validation — scope/trigger consistency`
+    describe block), `webhooks.controller.spec.ts` (STORY_REPLY event now
+    asserts `mediaId`). Frontend: `tsc --noEmit` and `eslint` both clean on
+    every changed file.
 
 ## Phase 9 — Launch
 

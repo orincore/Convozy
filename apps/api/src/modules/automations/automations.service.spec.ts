@@ -360,6 +360,62 @@ describe('AutomationsService.matchCommentEvent', () => {
     expect(messageSendQueue.add).not.toHaveBeenCalled();
   });
 
+  it('does not match when scoped to a specific story and the reply is on a different story', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({ source: TriggerSource.STORY_REPLY, mediaId: 'other-story', fromUsername: 'viewer-ig-id' }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        scopeType: AutomationScopeType.SPECIFIC_STORIES,
+        scopeMediaIds: ['story-1'],
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.STORY_REPLY,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: [],
+            caseSensitive: false,
+            aiIntentLabel: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('matches when scoped to a specific story and the reply is on that story', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({ source: TriggerSource.STORY_REPLY, mediaId: 'story-1', fromUsername: 'viewer-ig-id', text: '' }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        scopeType: AutomationScopeType.SPECIFIC_STORIES,
+        scopeMediaIds: ['story-1'],
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.STORY_REPLY,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: [],
+            caseSensitive: false,
+            aiIntentLabel: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalled();
+  });
+
   it('matches a REGEX trigger', async () => {
     const { service, prisma, messageSendQueue } = makeService();
     prisma.commentEvent.findUnique.mockResolvedValue(makeCommentEvent({ text: 'PRICE123' }));
@@ -599,6 +655,131 @@ describe('AutomationsService.matchCommentEvent', () => {
     await service.matchCommentEvent('comment-event-1');
 
     expect(messageSendQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('matches a LIVE_COMMENT-sourced event and dispatches REPLY_COMMENT with recipientType "comment"', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({
+        source: TriggerSource.LIVE_COMMENT,
+        externalEventId: 'live-comment-42',
+        text: 'price please',
+      }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.LIVE_COMMENT,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: ['price'],
+            caseSensitive: false,
+          },
+        ],
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.REPLY_COMMENT,
+            order: 0,
+            delaySeconds: 0,
+            payload: { text: 'Check your DMs!' },
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        actionType: ActionType.REPLY_COMMENT,
+        recipientId: 'live-comment-42',
+        recipientType: 'comment',
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('dispatches a HIDE_COMMENT action for a LIVE_COMMENT-sourced event with the live comment id — same endpoint as a regular comment', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({ source: TriggerSource.LIVE_COMMENT, externalEventId: 'live-comment-99', text: 'spam' }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.LIVE_COMMENT,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: ['spam'],
+            caseSensitive: false,
+          },
+        ],
+        actions: [
+          {
+            id: 'action-1',
+            automationId: 'automation-1',
+            type: ActionType.HIDE_COMMENT,
+            order: 0,
+            delaySeconds: 0,
+            payload: null,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({
+        actionType: ActionType.HIDE_COMMENT,
+        recipientId: 'live-comment-99',
+        recipientType: 'comment',
+        content: {},
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('sends a LIVE_COMMENT-sourced SEND_DM as a private reply keyed off the comment id, not the sender id', async () => {
+    const { service, prisma, messageSendQueue } = makeService();
+    prisma.commentEvent.findUnique.mockResolvedValue(
+      makeCommentEvent({
+        source: TriggerSource.LIVE_COMMENT,
+        externalEventId: 'live-comment-7',
+        fromUsername: 'streamer_fan',
+        text: 'link please',
+      }),
+    );
+    prisma.automation.findMany.mockResolvedValue([
+      makeAutomation({
+        triggers: [
+          {
+            id: 'trigger-1',
+            automationId: 'automation-1',
+            source: TriggerSource.LIVE_COMMENT,
+            matchType: TriggerMatchType.CONTAINS,
+            keywords: ['link'],
+            caseSensitive: false,
+          },
+        ],
+      }),
+    ]);
+
+    await service.matchCommentEvent('comment-event-1');
+
+    expect(messageSendQueue.add).toHaveBeenCalledWith(
+      'send',
+      expect.objectContaining({ recipientId: 'live-comment-7', recipientType: 'comment' }),
+      expect.any(Object),
+    );
   });
 });
 
@@ -1188,6 +1369,71 @@ describe('AutomationsService.resolvePostback', () => {
       expect.objectContaining({ content: expect.objectContaining({ text: 'Hi tapper_handle!' }) }),
       expect.any(Object),
     );
+  });
+});
+
+describe('AutomationsService write-time validation — scope/trigger consistency', () => {
+  function baseCreateInput(overrides: Record<string, unknown> = {}) {
+    return {
+      name: 'x',
+      instagramAccountId: 'ig-account-1',
+      triggers: [{ source: TriggerSource.COMMENT, matchType: TriggerMatchType.CONTAINS, keywords: ['x'] }],
+      actions: [{ type: ActionType.SEND_DM, payload: { text: 'hi' } }],
+      ...overrides,
+    } as any;
+  }
+
+  it('rejects SPECIFIC_STORIES with a COMMENT-only trigger set', async () => {
+    const { service } = makeService();
+    await expect(
+      service.create('workspace-1', baseCreateInput({ scopeType: AutomationScopeType.SPECIFIC_STORIES, scopeMediaIds: ['story-1'] })),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('rejects SPECIFIC_POSTS with a STORY_REPLY-only trigger set', async () => {
+    const { service } = makeService();
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput({
+          triggers: [{ source: TriggerSource.STORY_REPLY, matchType: TriggerMatchType.CONTAINS, keywords: [] }],
+          scopeType: AutomationScopeType.SPECIFIC_POSTS,
+          scopeMediaIds: ['media-1'],
+        }),
+      ),
+    ).rejects.toThrow(AppException);
+  });
+
+  it('allows ALL_STORIES with a STORY_REPLY trigger', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue(makeAutomation());
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput({
+          triggers: [{ source: TriggerSource.STORY_REPLY, matchType: TriggerMatchType.CONTAINS, keywords: [] }],
+          scopeType: AutomationScopeType.ALL_STORIES,
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it('allows ALL_POSTS regardless of trigger sources (the harmless default)', async () => {
+    const { service, prisma } = makeService();
+    prisma.automation.create.mockResolvedValue(makeAutomation());
+    prisma.automation.findUnique.mockResolvedValue(makeAutomation());
+
+    await expect(
+      service.create(
+        'workspace-1',
+        baseCreateInput({
+          triggers: [{ source: TriggerSource.DM, matchType: TriggerMatchType.CONTAINS, keywords: [] }],
+          scopeType: AutomationScopeType.ALL_POSTS,
+        }),
+      ),
+    ).resolves.toBeDefined();
   });
 });
 

@@ -143,7 +143,34 @@ function MediaThumb({
   );
 }
 
-function PostPicker({
+/** Which content-scope bucket a scopeType belongs to. Declaring this in the
+ * "Choose posts" step is what drives the Build step's trigger Source — see
+ * `syncTriggerSourcesToScopeKind` below. */
+function scopeKindOf(scopeType: AutomationScopeType): 'post' | 'story' {
+  return scopeType === 'ALL_STORIES' || scopeType === 'SPECIFIC_STORIES' ? 'story' : 'post';
+}
+
+const SCOPE_OPTIONS: {
+  kind: 'post' | 'story';
+  groupLabel: string;
+  all: { value: AutomationScopeType; title: string; hint: string };
+  specific: { value: AutomationScopeType; title: string; hint: string };
+}[] = [
+  {
+    kind: 'post',
+    groupLabel: 'Posts & reels',
+    all: { value: 'ALL_POSTS', title: 'All posts', hint: 'Watch every post and reel on this account' },
+    specific: { value: 'SPECIFIC_POSTS', title: 'Specific posts', hint: 'Pick which posts this rule watches' },
+  },
+  {
+    kind: 'story',
+    groupLabel: 'Stories',
+    all: { value: 'ALL_STORIES', title: 'All stories', hint: 'Watch replies to every story you post' },
+    specific: { value: 'SPECIFIC_STORIES', title: 'Specific story', hint: 'Pick one active story this rule watches' },
+  },
+];
+
+function ScopePicker({
   accountId,
   scopeType,
   onScopeTypeChange,
@@ -158,6 +185,8 @@ function PostPicker({
 }) {
   const [media, setMedia] = useState<RecentMediaItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const kind = scopeKindOf(scopeType);
+  const isSpecific = scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES';
 
   // Resetting local state before an async fetch triggered by a prop change
   // is the standard pattern here (same justified case as AuthGuard) — the
@@ -166,47 +195,51 @@ function PostPicker({
   // state, not about clearing stale data before a fresh fetch.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (scopeType !== 'SPECIFIC_POSTS' || !accountId) return;
+    if (!isSpecific || !accountId) return;
     setMedia(null);
     setError(null);
-    instagramApi
-      .listMedia(accountId)
+    const fetcher = kind === 'story' ? instagramApi.listStories : instagramApi.listMedia;
+    fetcher(accountId)
       .then(setMedia)
       .catch((err: ApiError) => setError(err.message));
-  }, [accountId, scopeType]);
+  }, [accountId, isSpecific, kind]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <div className="flex flex-col gap-4 rounded-[var(--radius-card)] border border-border bg-card p-5">
       <div>
         <h2 className="text-sm font-semibold text-foreground">Applies to</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Choose which posts this automation watches.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Choose whether this watches posts/reels or stories — this also sets the trigger type below, in Build automation.
+        </p>
       </div>
 
       <RadioGroup
         value={scopeType}
         onValueChange={(v) => onScopeTypeChange(v as AutomationScopeType)}
-        className="gap-2"
+        className="gap-4"
       >
-        {[
-          { value: 'ALL_POSTS', title: 'All posts', hint: 'Watch every post and reel on this account' },
-          { value: 'SPECIFIC_POSTS', title: 'Specific posts', hint: 'Pick which posts this rule watches' },
-        ].map((opt) => (
-          <label
-            key={opt.value}
-            htmlFor={`scope-${opt.value}`}
-            className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border border-border p-3 transition-colors has-[[data-state=checked]]:border-accent has-[[data-state=checked]]:bg-muted"
-          >
-            <RadioGroupItem id={`scope-${opt.value}`} value={opt.value} className="mt-0.5" />
-            <span>
-              <span className="block text-sm text-foreground">{opt.title}</span>
-              <span className="block text-xs text-muted-foreground">{opt.hint}</span>
-            </span>
-          </label>
+        {SCOPE_OPTIONS.map((group) => (
+          <div key={group.kind} className="flex flex-col gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{group.groupLabel}</span>
+            {[group.all, group.specific].map((opt) => (
+              <label
+                key={opt.value}
+                htmlFor={`scope-${opt.value}`}
+                className="flex cursor-pointer items-start gap-3 rounded-[var(--radius-control)] border border-border p-3 transition-colors has-[[data-state=checked]]:border-accent has-[[data-state=checked]]:bg-muted"
+              >
+                <RadioGroupItem id={`scope-${opt.value}`} value={opt.value} className="mt-0.5" />
+                <span>
+                  <span className="block text-sm text-foreground">{opt.title}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
         ))}
       </RadioGroup>
 
-      {scopeType === 'SPECIFIC_POSTS' && (
+      {isSpecific && (
         <div>
           {!accountId && <p className="text-xs text-muted-foreground">Pick an account first.</p>}
           {error && (
@@ -221,7 +254,9 @@ function PostPicker({
             </div>
           )}
           {media && media.length === 0 && (
-            <p className="text-xs text-muted-foreground">No recent posts found on this account.</p>
+            <p className="text-xs text-muted-foreground">
+              {kind === 'story' ? 'No active stories found on this account.' : 'No recent posts found on this account.'}
+            </p>
           )}
           {media && media.length > 0 && (
             <>
@@ -341,7 +376,10 @@ function readDraft(automation: Automation | undefined): DraftData | null {
     v: 1,
     step: d.step && WIZARD_STEPS.some((w) => w.key === d.step) ? d.step : 'posts',
     name: typeof d.name === 'string' ? d.name : '',
-    scopeType: d.scopeType === 'SPECIFIC_POSTS' ? 'SPECIFIC_POSTS' : 'ALL_POSTS',
+    scopeType:
+      d.scopeType === 'SPECIFIC_POSTS' || d.scopeType === 'ALL_STORIES' || d.scopeType === 'SPECIFIC_STORIES'
+        ? d.scopeType
+        : 'ALL_POSTS',
     selectedMediaIds: Array.isArray(d.selectedMediaIds) ? d.selectedMediaIds : [],
     triggers: d.triggers,
     actionSteps: d.actionSteps,
@@ -446,6 +484,34 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
 
   function updateTrigger(index: number, patch: Partial<TriggerRow>) {
     setTriggers((current) => current.map((t, i) => (i === index ? { ...t, ...patch } : t)));
+    // Picking a post/live-comment or story-reply Source here (Build automation)
+    // is the reverse direction of the "Choose posts" step declaring the scope
+    // kind — keep the two in sync either way, per the same rule.
+    if (patch.source === 'STORY_REPLY' && scopeKindOf(scopeType) !== 'story') {
+      setScopeType('ALL_STORIES');
+      setSelectedMediaIds([]);
+    } else if ((patch.source === 'COMMENT' || patch.source === 'LIVE_COMMENT') && scopeKindOf(scopeType) !== 'post') {
+      setScopeType('ALL_POSTS');
+      setSelectedMediaIds([]);
+    }
+  }
+
+  /** Declaring "posts" vs "stories" in the Choose-posts step also updates the
+   * trigger Source shown in Build automation, so the two steps never disagree
+   * about what this automation actually watches. */
+  function syncTriggerSourcesToScope(scope: AutomationScopeType) {
+    const kind = scopeKindOf(scope);
+    setTriggers((current) =>
+      current.map((t) => {
+        if (kind === 'story' && (t.source === 'COMMENT' || t.source === 'LIVE_COMMENT')) {
+          return { ...t, source: 'STORY_REPLY' };
+        }
+        if (kind === 'post' && t.source === 'STORY_REPLY') {
+          return { ...t, source: 'COMMENT' };
+        }
+        return t;
+      }),
+    );
   }
 
   function toggleMedia(id: string) {
@@ -536,6 +602,9 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (scopeType === 'SPECIFIC_POSTS' && selectedMediaIds.length === 0) {
       return 'Pick at least one post, or switch to "All posts".';
     }
+    if (scopeType === 'SPECIFIC_STORIES' && selectedMediaIds.length === 0) {
+      return 'Pick a story, or switch to "All stories".';
+    }
     return null;
   }
 
@@ -550,6 +619,9 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
     if (actionStepsError) return actionStepsError;
     if (scopeType === 'SPECIFIC_POSTS' && triggers.every((t) => CONVERSATION_ONLY_SOURCES.includes(t.source))) {
       return 'DMs, story replies, story mentions and link clicks aren’t tied to a specific post. Go back and choose "All posts", or add a comment trigger too.';
+    }
+    if ((scopeType === 'ALL_STORIES' || scopeType === 'SPECIFIC_STORIES') && !triggers.some((t) => t.source === 'STORY_REPLY')) {
+      return 'A story scope needs a "Story reply" trigger. Go back and choose "Posts & reels" instead, or add a story reply trigger.';
     }
     return null;
   }
@@ -620,7 +692,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
         await automationsApi.update(automation.id, {
           name: name.trim() || 'Untitled automation',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : [],
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : [],
           triggers: triggerInputs,
           actions: actionInputs,
         });
@@ -630,7 +702,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           name: name.trim() || 'Untitled automation',
           status: 'ACTIVE',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : [],
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : [],
           triggers: triggerInputs,
           actions: actionInputs,
         });
@@ -640,7 +712,7 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
           instagramAccountId: accountId,
           status: 'ACTIVE',
           scopeType,
-          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' ? selectedMediaIds : undefined,
+          scopeMediaIds: scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES' ? selectedMediaIds : undefined,
           triggers: triggerInputs,
           actions: actionInputs,
         };
@@ -825,17 +897,18 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
         {wizard && step === 'posts' && (
           <section aria-label="Choose posts" className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-2">
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">Which posts should this watch?</h2>
+              <h2 className="text-lg font-semibold tracking-tight">What should this watch?</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Pick every post and reel, or only the ones you choose. This applies to comment triggers; DMs, story replies and link clicks are not tied to a post.
+                Choose posts/reels or stories, and every post or one specific one. DMs and link clicks are not tied to either.
               </p>
             </div>
-            <PostPicker
+            <ScopePicker
               accountId={accountId}
               scopeType={scopeType}
               onScopeTypeChange={(scope) => {
                 setScopeType(scope);
-                if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
+                setSelectedMediaIds([]);
+                syncTriggerSourcesToScope(scope);
               }}
               selectedMediaIds={selectedMediaIds}
               onToggleMedia={toggleMedia}
@@ -859,8 +932,12 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
                 <dd className="mt-0.5 font-medium">{account ? `@${account.igUsername}` : 'None'}</dd>
               </div>
               <div>
-                <dt className="text-xs text-muted-foreground">Posts</dt>
-                <dd className="mt-0.5 font-medium">{scopeType === 'ALL_POSTS' ? 'All posts and reels' : `${selectedMediaIds.length} selected`}</dd>
+                <dt className="text-xs text-muted-foreground">{scopeKindOf(scopeType) === 'story' ? 'Stories' : 'Posts'}</dt>
+                <dd className="mt-0.5 font-medium">
+                  {scopeType === 'ALL_POSTS' && 'All posts and reels'}
+                  {scopeType === 'ALL_STORIES' && 'Every story'}
+                  {(scopeType === 'SPECIFIC_POSTS' || scopeType === 'SPECIFIC_STORIES') && `${selectedMediaIds.length} selected`}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Triggers</dt>
@@ -1055,12 +1132,13 @@ export function AutomationForm({ accounts, automation }: AutomationFormProps) {
                   <Separator />
 
                   <section aria-label="Applies to">
-                    <PostPicker
+                    <ScopePicker
                       accountId={accountId}
                       scopeType={scopeType}
                       onScopeTypeChange={(scope) => {
                         setScopeType(scope);
-                        if (scope === 'ALL_POSTS') setSelectedMediaIds([]);
+                        setSelectedMediaIds([]);
+                        syncTriggerSourcesToScope(scope);
                       }}
                       selectedMediaIds={selectedMediaIds}
                       onToggleMedia={toggleMedia}

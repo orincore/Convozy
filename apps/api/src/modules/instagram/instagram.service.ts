@@ -288,6 +288,47 @@ export class InstagramService {
     }));
   }
 
+  /**
+   * Active stories (last 24h) for the "specific story" automation scope
+   * picker. Story media isn't returned by the regular /media endpoint —
+   * Meta requires the dedicated GET /{ig-user-id}/stories endpoint (confirmed
+   * against Meta's IG User reference docs, 2026-09-27). Only currently-active
+   * stories are returned; once a story expires its ID can no longer be
+   * picked here (existing automations scoped to it simply stop matching).
+   */
+  async listRecentStories(instagramAccountId: string): Promise<RecentMediaItem[]> {
+    const credentials = await this.getSendCredentials(instagramAccountId);
+    if (!credentials) {
+      return [];
+    }
+
+    const meta = this.configService.get('meta', { infer: true });
+    const params = new URLSearchParams({
+      fields: 'id,media_type,media_url,thumbnail_url,permalink,timestamp',
+      access_token: credentials.accessToken,
+    });
+
+    const res = await fetch(
+      `https://graph.instagram.com/${meta.graphApiVersion}/${credentials.igBusinessId}/stories?${params.toString()}`,
+    );
+
+    if (!res.ok) {
+      const body = await res.text();
+      this.logger.error(`Story list fetch failed for account ${instagramAccountId}: ${res.status} ${body}`);
+      return [];
+    }
+
+    const { data } = (await res.json()) as { data: InstagramMediaItem[] };
+    return data.map((item) => ({
+      id: item.id,
+      caption: null,
+      mediaType: item.media_type,
+      thumbnailUrl: item.thumbnail_url ?? item.media_url ?? null,
+      permalink: item.permalink,
+      timestamp: item.timestamp,
+    }));
+  }
+
   /** Permalink + caption of one of the account's own posts, for showing what a ticket is about. Null on any failure. */
   async getMediaInfo(instagramAccountId: string, mediaId: string): Promise<{ permalink: string | null; caption: string | null } | null> {
     const credentials = await this.getSendCredentials(instagramAccountId);

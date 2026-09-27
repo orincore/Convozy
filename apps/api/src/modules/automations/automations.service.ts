@@ -145,6 +145,7 @@ export class AutomationsService {
       );
     }
     this.validateTriggers(dto.triggers);
+    this.validateScope(dto.scopeType, dto.triggers);
     await this.checkTriggerEntitlements(workspaceId, dto.triggers);
     this.validateActionTree(dto.actions);
 
@@ -225,6 +226,10 @@ export class AutomationsService {
     if (dto.triggers) {
       this.validateTriggers(dto.triggers);
       await this.checkTriggerEntitlements(workspaceId, dto.triggers);
+    }
+    if (dto.scopeType !== undefined || dto.triggers) {
+      const effectiveTriggers: TriggerDto[] = dto.triggers ?? current.triggers.map((t) => ({ source: t.source }) as TriggerDto);
+      this.validateScope(dto.scopeType ?? current.scopeType, effectiveTriggers);
     }
     if (dto.actions) {
       this.validateActionTree(dto.actions);
@@ -411,6 +416,31 @@ export class AutomationsService {
   }
 
   /** Rejects an unparseable REGEX pattern at write time rather than silently never matching. */
+  /**
+   * SPECIFIC_STORIES/ALL_STORIES only make sense for a STORY_REPLY trigger
+   * (a story ID means nothing to a comment/DM event); SPECIFIC_POSTS only
+   * for COMMENT/LIVE_COMMENT. Client-side the builder keeps these in sync
+   * automatically, but this is still validated server-side — CLAUDE.md §5a
+   * A03/A04, never trust the client to have enforced it.
+   */
+  private validateScope(scopeType: AutomationScopeType | undefined, triggers: TriggerDto[]): void {
+    if (!scopeType || scopeType === AutomationScopeType.ALL_POSTS) return;
+    const sources = new Set(triggers.map((t) => t.source));
+    const isStoryScope = scopeType === AutomationScopeType.ALL_STORIES || scopeType === AutomationScopeType.SPECIFIC_STORIES;
+    if (isStoryScope && !sources.has(TriggerSource.STORY_REPLY)) {
+      throw new AppException(
+        'SCOPE_TRIGGER_MISMATCH',
+        'A story scope needs a "Story reply" trigger.',
+      );
+    }
+    if (!isStoryScope && !sources.has(TriggerSource.COMMENT) && !sources.has(TriggerSource.LIVE_COMMENT)) {
+      throw new AppException(
+        'SCOPE_TRIGGER_MISMATCH',
+        'Choosing specific posts needs a comment or live-comment trigger.',
+      );
+    }
+  }
+
   private validateTriggers(triggers: TriggerDto[]): void {
     for (const trigger of triggers) {
       if (trigger.matchType === TriggerMatchType.REGEX) {
@@ -595,7 +625,10 @@ export class AutomationsService {
   }
 
   private automationMatches(automation: AutomationWithRelations, commentEvent: CommentEvent): boolean {
-    if (automation.scopeType === AutomationScopeType.SPECIFIC_POSTS) {
+    if (
+      automation.scopeType === AutomationScopeType.SPECIFIC_POSTS ||
+      automation.scopeType === AutomationScopeType.SPECIFIC_STORIES
+    ) {
       if (!commentEvent.mediaId || !automation.scopeMediaIds.includes(commentEvent.mediaId)) {
         return false;
       }

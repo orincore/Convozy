@@ -74,6 +74,60 @@ function messagingPayload(event: Record<string, unknown>): MetaWebhookPayload {
   } as MetaWebhookPayload;
 }
 
+function changePayload(field: string, value: Record<string, unknown>): MetaWebhookPayload {
+  return {
+    object: 'instagram',
+    entry: [
+      {
+        id: 'ig-business-1',
+        time: 1700000000,
+        changes: [{ field, value }],
+      },
+    ],
+  } as MetaWebhookPayload;
+}
+
+describe('WebhooksController.receive — comments vs live comments', () => {
+  it('maps a "comments" field change to a COMMENT event', async () => {
+    const { controller, webhooksService } = makeController();
+    const payload = changePayload('comments', {
+      id: 'comment-1',
+      text: 'nice post',
+      from: { id: 'ig-scoped-user-1', username: 'viewer1' },
+      media: { id: 'media-1' },
+    });
+
+    await controller.receive(makeRequest(payload), 'sha256=x');
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({ externalEventId: 'comment-1', source: 'COMMENT', mediaId: 'media-1' }),
+    );
+  });
+
+  it('maps a "live_comments" field change to a LIVE_COMMENT event, not COMMENT', async () => {
+    const { controller, webhooksService } = makeController();
+    const payload = changePayload('live_comments', {
+      id: 'live-comment-1',
+      text: 'hi from the stream',
+      from: { id: 'ig-scoped-user-2', username: 'viewer2' },
+      media: { id: 'live-media-1' },
+    });
+
+    await controller.receive(makeRequest(payload), 'sha256=x');
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalEventId: 'live-comment-1',
+        source: 'LIVE_COMMENT',
+        mediaId: 'live-media-1',
+        fromUsername: 'viewer2',
+        fromIgScopedId: 'ig-scoped-user-2',
+        text: 'hi from the stream',
+      }),
+    );
+  });
+});
+
 describe('WebhooksController.receive — story replies', () => {
   it('enqueues a STORY_REPLY event for a message with reply_to.story', async () => {
     const { controller, webhooksService } = makeController();
@@ -107,6 +161,7 @@ describe('WebhooksController.receive — story replies', () => {
         instagramAccountId: 'account-1',
         source: 'STORY_REPLY',
         fromUsername: 'ig-scoped-user-1',
+        mediaId: 'story-1',
         text: 'love this!',
       }),
     );

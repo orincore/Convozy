@@ -41,6 +41,12 @@ model User {
   ticketEvents    TicketEvent[]
   invitesSent     WorkspaceInvite[]
 
+  // Platform-level (Convozy staff) suspension — distinct from anything a
+  // workspace's own OWNER/ADMIN can do to a teammate. Set only via the
+  // separate admin panel (see AdminUser below); blocks customer login.
+  isSuspended Boolean   @default(false)
+  suspendedAt DateTime?
+
   @@index([workspaceId])
 }
 
@@ -48,6 +54,51 @@ enum UserRole {
   OWNER
   ADMIN
   MEMBER
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// platform admin (internal ops — Convozy staff, not a customer-facing role)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Deliberately its own table/credential space, not a value of UserRole:
+// UserRole is workspace-scoped (a workspace's own ADMIN must never see other
+// workspaces' users), so a platform-wide "see/manage every user" capability
+// cannot reuse it without a broken-access-control bug (CLAUDE.md §5a A01).
+// User-directed decision, 2026-09-27: fully separate admin auth, own table.
+
+enum AdminRole {
+  SUPERADMIN
+  SUPPORT
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String?
+  role         AdminRole @default(SUPPORT)
+  lastLoginAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditLogs AdminAuditLog[]
+}
+
+model AdminAuditLog {
+  id      String    @id @default(cuid())
+  adminId String
+  admin   AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  // e.g. "user.suspend", "user.unsuspend"
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
 }
 
 model Workspace {
@@ -158,7 +209,10 @@ model Automation {
   name      String
   status    AutomationStatus @default(ACTIVE)
   scopeType AutomationScopeType @default(ALL_POSTS)
-  scopeMediaIds String[] // Instagram media IDs when scopeType = SPECIFIC_POSTS
+  // Instagram media IDs when scopeType = SPECIFIC_POSTS, or story IDs when
+  // scopeType = SPECIFIC_STORIES. Same field, generic name, reused by both —
+  // never both scope types on one automation at once (see automations.service.ts).
+  scopeMediaIds String[]
   priority  Int @default(0) // higher runs first when multiple automations could match
 
   // Work-in-progress builder state while status = DRAFT: the dashboard's own
@@ -188,6 +242,12 @@ enum AutomationStatus {
 enum AutomationScopeType {
   ALL_POSTS
   SPECIFIC_POSTS
+  // Story-reply-only scoping, added 2026-09-27: a STORY_REPLY automation can
+  // watch every story (ALL_STORIES) or one specific, already-posted story
+  // (SPECIFIC_STORIES, scopeMediaIds holds the story's media ID). Meaningless
+  // for COMMENT/LIVE_COMMENT/DM triggers — see automations.service.ts.
+  ALL_STORIES
+  SPECIFIC_STORIES
 }
 
 model Trigger {

@@ -82,6 +82,7 @@ function AutomationRow({
               : automation.triggers[0]?.source ?? 'No trigger'}
           {keywords.length > 0 && <> · &ldquo;{keywords.join('", "')}&rdquo;</>}
           {automation.scopeType === 'SPECIFIC_POSTS' && ' · specific posts'}
+          {automation.scopeType === 'SPECIFIC_STORIES' && ' · specific story'}
         </p>
       </div>
 

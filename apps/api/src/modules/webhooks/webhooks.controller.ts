@@ -201,7 +201,15 @@ export class WebhooksController {
     }
 
     if (message.reply_to?.story) {
-      events.push({ ...base, externalEventId: message.mid, source: 'STORY_REPLY', text: message.text ?? '' });
+      // Story ID, so an automation can be scoped to one specific story
+      // (AutomationScopeType.SPECIFIC_STORIES) instead of only "every story".
+      events.push({
+        ...base,
+        externalEventId: message.mid,
+        source: 'STORY_REPLY',
+        mediaId: message.reply_to.story.id,
+        text: message.text ?? '',
+      });
     } else if (message.attachments?.some((a) => a.type === 'story_mention')) {
       events.push({ ...base, externalEventId: message.mid, source: 'STORY_MENTION', text: '' });
     } else {
