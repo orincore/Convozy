@@ -8,14 +8,20 @@ import { CtaButton } from '@/components/marketing/cta-button';
 import { Reveal } from '@/components/marketing/reveal';
 import { DonateButton } from '@/components/marketing/donate-button';
 import { Comparison, PlanCards, Section } from '@/components/marketing/pricing-sections';
+import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 
+const TITLE = 'Free Instagram Auto DM Tool Pricing: $0 Plan, No Card | Convozy';
+const DESCRIPTION =
+  'Convozy is free for creators: every feature that works today is on the Free plan, with no card needed. Pro is for big audiences and more than one Instagram account.';
+
 export const metadata: Metadata = {
-  title: 'Pricing | Convozy',
-  description:
-    'Convozy is free for creators: every feature that works today is on the Free plan, with no card needed. Pro is for big audiences and more than one Instagram account.',
-  alternates: { canonical: '/pricing' },
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, url: '/pricing', siteName: 'Convozy', type: 'website' },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION },
+  alternates: { canonical: '/pricing', languages: hreflangAlternates('/pricing') },
 };
 
 const FAQ_TABS: FaqTab[] = [
@@ -62,6 +68,8 @@ export default function PricingPage() {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name: 'Convozy',
+    brand: { '@type': 'Brand', name: 'Convozy' },
+    image: `${SITE_URL}/brand/logo-white.png`,
     offers: {
       '@type': 'Offer',
       price: '0',
@@ -92,15 +100,16 @@ export default function PricingPage() {
             { name: 'Pricing', href: '/pricing' },
           ]}
         />
-        <Reveal>
-          <h1 className="font-display mt-10 max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-7xl">
-            Free for creators. Really.
-          </h1>
-          <p className="mt-6 max-w-xl text-lg text-muted-foreground">
-            Automating your DMs should not cost a creator a cent. The good stuff is free, and you only pay when
-            you are big enough to need more.
-          </p>
-        </Reveal>
+        {/* Not wrapped in Reveal: this is the page's LCP element - a
+            JS-gated opacity-0-until-hydration fade delayed mobile LCP by
+            over 3s (perf audit, 2026-09-27). Render it visible immediately. */}
+        <h1 className="font-display mt-10 max-w-3xl text-5xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-7xl">
+          Free for creators. Really.
+        </h1>
+        <p className="mt-6 max-w-xl text-lg text-muted-foreground">
+          Automating your DMs should not cost a creator a cent. The good stuff is free, and you only pay when
+          you are big enough to need more.
+        </p>
         <div className="mt-14">
           <PlanCards />
         </div>

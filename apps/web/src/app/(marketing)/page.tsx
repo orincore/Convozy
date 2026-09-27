@@ -17,6 +17,7 @@ import { AutomationPreview } from '@/components/marketing/automation-preview';
 import { Reveal } from '@/components/marketing/reveal';
 import { RotatingLines, type RotatingLine } from '@/components/marketing/rotating-lines';
 import { IntegrationBadges } from '@/components/marketing/integration-badges';
+import { hreflangAlternates } from '@/lib/seo';
 
 /**
  * Homepage - unique title/description per CLAUDE.md §11, targeting real
@@ -42,6 +43,7 @@ export const metadata: Metadata = {
   },
   alternates: {
     canonical: '/',
+    languages: hreflangAlternates('/'),
   },
 };
 

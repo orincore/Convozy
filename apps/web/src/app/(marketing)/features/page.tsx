@@ -6,14 +6,20 @@ import { Reveal } from '@/components/marketing/reveal';
 import { FeatureCard } from '@/components/marketing/feature-card';
 import { SpotlightCard } from '@/components/marketing/spotlight-card';
 import { FEATURES } from '@/lib/features';
+import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 
+const TITLE = 'Instagram Comment Automation Features, All Free | Convozy';
+const DESCRIPTION =
+  'Everything Convozy does for Instagram creators: comment to DM, story replies, live comments, tags, templates and more. Every feature that works today is free.';
+
 export const metadata: Metadata = {
-  title: 'Features | Convozy',
-  description:
-    'Everything Convozy does for Instagram creators: comment to DM, story replies, live comments, tags, templates and more. All free.',
-  alternates: { canonical: '/features' },
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, url: '/features', siteName: 'Convozy', type: 'website' },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION },
+  alternates: { canonical: '/features', languages: hreflangAlternates('/features') },
 };
 
 const live = FEATURES.filter((f) => f.status === 'live');

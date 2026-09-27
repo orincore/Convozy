@@ -6,6 +6,7 @@ import { MarketingNav } from '@/components/marketing/nav';
 import { MarketingFooter } from '@/components/marketing/footer';
 import { MarketingBackdrop } from '@/components/marketing/backdrop';
 import { ScrollBlur } from '@/components/marketing/scroll-blur';
+import { FEATURES } from '@/lib/features';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -38,8 +39,28 @@ const spaceGrotesk = Space_Grotesk({
  * `robots: noindex` instead. Design per `taste-skill` (CLAUDE.md §12) —
  * see globals.css for the shared token system.
  */
+// Real countries the product is actually usable in today (no region lock,
+// no currency/localization gate) - not a claim of localized content or
+// in-market presence, see lib/seo.ts hreflangAlternates for the same
+// distinction on the hreflang side.
+const AREA_SERVED = ['US', 'AE', 'CA', 'GB', 'AU', 'IN'];
+
 export default function MarketingLayout({ children }: { children: ReactNode }) {
-  const organizationJsonLd = {
+  const orgJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: SITE_NAME,
+    url: SITE_URL,
+    logo: `${SITE_URL}/brand/logo-white.png`,
+    description: 'Convozy automates Instagram comment replies and DMs for creators - free to start.',
+    parentOrganization: {
+      '@type': 'Organization',
+      name: 'Orincore',
+      url: 'https://www.orincore.com',
+    },
+  };
+
+  const softwareApplicationJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
     name: SITE_NAME,
@@ -48,6 +69,9 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
     description:
       'Automate Instagram comment replies and DMs. Turn "comment X" posts into automatic, instant DM delivery - free to start.',
     url: SITE_URL,
+    areaServed: AREA_SERVED,
+    publisher: { '@type': 'Organization', name: 'Orincore', url: 'https://www.orincore.com' },
+    featureList: FEATURES.filter((f) => f.status === 'live').map((f) => f.title),
     offers: {
       '@type': 'Offer',
       price: '0',
@@ -57,7 +81,8 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className={`${spaceGrotesk.variable} relative overflow-x-clip`}>
-      <JsonLd data={organizationJsonLd} />
+      <JsonLd data={orgJsonLd} />
+      <JsonLd data={softwareApplicationJsonLd} />
       <MarketingBackdrop />
       <div className="relative z-10">
         <ScrollBlur />

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Breadcrumbs } from '@/components/seo/breadcrumbs';
 import { LegalArticle } from '@/components/marketing/legal-article';
+import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 const LAST_UPDATED = '2026-09-22';
@@ -18,6 +19,7 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
   alternates: {
     canonical: '/privacy',
+    languages: hreflangAlternates('/privacy'),
   },
 };
 

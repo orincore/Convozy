@@ -8,15 +8,22 @@ import { Bezel } from '@/components/marketing/bezel';
 import { LiveDemo } from '@/components/marketing/live-demo';
 import { ActivityFeed } from '@/components/marketing/activity-feed';
 import { JsonLd } from '@/components/seo/json-ld';
+import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 
+const TITLE = 'Comment-to-DM Automation for Instagram | Convozy';
+const DESCRIPTION =
+  'Automatically DM anyone who comments a keyword on your Instagram post or Reel. Set it up in minutes, free to start.';
+
 export const metadata: Metadata = {
-  title: 'Comment-to-DM Automation for Instagram | Convozy',
-  description:
-    'Automatically DM anyone who comments a keyword on your Instagram post or Reel. Set it up in minutes, free to start.',
+  title: TITLE,
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, url: '/features/comment-to-dm', siteName: 'Convozy', type: 'website' },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION },
   alternates: {
     canonical: '/features/comment-to-dm',
+    languages: hreflangAlternates('/features/comment-to-dm'),
   },
 };
 

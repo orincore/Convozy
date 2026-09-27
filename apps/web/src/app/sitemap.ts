@@ -9,23 +9,28 @@ const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001'
  * there are enough dynamic routes (blog posts, feature pages from a CMS),
  * generate this list from that data source instead of hardcoding it.
  */
-export default function sitemap(): MetadataRoute.Sitemap {
-  const staticRoutes = [
-    '/',
-    '/pricing',
-    '/donate',
-    '/features',
-    '/features/comment-to-dm',
-    '/privacy',
-    '/terms',
-    '/data-deletion',
-  ];
+// Real last-significant-content-change date per route, not the build/request
+// time - a sitemap where every URL shares today's date on every crawl tells
+// Google nothing about what actually changed, and gets discounted over time.
+// Bump ONLY the route(s) you actually edited, not this whole map, whenever
+// their content meaningfully changes.
+const LAST_MODIFIED: Record<string, string> = {
+  '/': '2026-09-27',
+  '/pricing': '2026-09-27',
+  '/donate': '2026-09-27',
+  '/features': '2026-09-27',
+  '/features/comment-to-dm': '2026-09-27',
+  '/privacy': '2026-09-27',
+  '/terms': '2026-09-27',
+  '/data-deletion': '2026-09-27',
+};
 
+export default function sitemap(): MetadataRoute.Sitemap {
   const legalRoutes = new Set(['/privacy', '/terms', '/data-deletion']);
 
-  return staticRoutes.map((route) => ({
+  return Object.entries(LAST_MODIFIED).map(([route, lastModified]) => ({
     url: `${SITE_URL}${route}`,
-    lastModified: new Date(),
+    lastModified,
     changeFrequency: 'weekly',
     priority: route === '/' ? 1 : legalRoutes.has(route) ? 0.3 : 0.7,
   }));

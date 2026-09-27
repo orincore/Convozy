@@ -30,12 +30,17 @@ export function InkReveal({ text, holdMs = 6000 }: { text: string; holdMs?: numb
     let cancelled = false;
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     (async () => {
+      // Starts fully visible (initial="visible" below) so the headline is
+      // legible on first paint instead of gating LCP and text extraction
+      // behind a JS-driven fade-in - the loop only fades out/in after the
+      // first hold.
+      await wait(holdMs);
       while (!cancelled) {
-        await controls.start('visible');
-        await wait(holdMs);
-        if (cancelled) return;
         await controls.start('hidden');
         await wait(350);
+        if (cancelled) return;
+        await controls.start('visible');
+        await wait(holdMs);
       }
     })();
     return () => {
@@ -51,7 +56,7 @@ export function InkReveal({ text, holdMs = 6000 }: { text: string; holdMs?: numb
       aria-label={text}
       className="inline-block whitespace-nowrap"
       variants={container}
-      initial="hidden"
+      initial="visible"
       animate={controls}
     >
       {text.split('').map((c, i) => (

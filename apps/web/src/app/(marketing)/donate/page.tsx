@@ -3,6 +3,7 @@ import { Breadcrumbs } from '@/components/seo/breadcrumbs';
 import { Reveal } from '@/components/marketing/reveal';
 import { DonateForm } from '@/components/marketing/donate-form';
 import { Check } from '@phosphor-icons/react/dist/ssr';
+import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
   title: 'Donate | Convozy',
   description:
     'Convozy is free for creators. Donate any amount you wish to keep the platform alive and free for other creators too.',
-  alternates: { canonical: '/donate' },
+  alternates: { canonical: '/donate', languages: hreflangAlternates('/donate') },
 };
 
 const GOES_TO = [
