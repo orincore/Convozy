@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { AdminRole } from '@prisma/client';
+import { AdminRole, TicketStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotFoundAppException, ForbiddenAppException } from '../../common/utils/app-exception';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+
+const CLOSED_TICKET_STATUSES: TicketStatus[] = [TicketStatus.RESOLVED, TicketStatus.CLOSED];
 
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -61,6 +63,12 @@ export class AdminUsersService {
     };
   }
 
+  /**
+   * Everything a support/superadmin needs to help this specific person
+   * without digging through the DB by hand: their team, every connected
+   * Instagram account, billing state, usage this period, and a trail of
+   * both workspace activity and admin actions taken on the account.
+   */
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -69,9 +77,51 @@ export class AdminUsersService {
           select: {
             id: true,
             name: true,
-            instagramAccounts: { select: { id: true, igUsername: true } },
-            automations: { select: { id: true } },
-            subscription: { select: { planId: true, status: true } },
+            createdAt: true,
+            users: {
+              select: { id: true, email: true, name: true, role: true, isSuspended: true, createdAt: true },
+              orderBy: { createdAt: 'asc' },
+            },
+            instagramAccounts: {
+              select: {
+                id: true,
+                igUsername: true,
+                displayName: true,
+                profilePictureUrl: true,
+                followersCount: true,
+                accountType: true,
+                pageId: true,
+                status: true,
+                tokenExpiresAt: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'asc' },
+            },
+            automations: {
+              select: { id: true, name: true, status: true, createdAt: true },
+              orderBy: { createdAt: 'desc' },
+            },
+            subscription: {
+              select: {
+                planId: true,
+                status: true,
+                provider: true,
+                currentPeriodEnd: true,
+                cancelAtPeriodEnd: true,
+                plan: {
+                  select: {
+                    name: true,
+                    slug: true,
+                    monthlySendLimit: true,
+                    maxInstagramAccounts: true,
+                    aiFeaturesEnabled: true,
+                    priceUsdCents: true,
+                    priceInrPaise: true,
+                  },
+                },
+              },
+            },
+            _count: { select: { contacts: true, tickets: true } },
           },
         },
       },
@@ -79,8 +129,41 @@ export class AdminUsersService {
     if (!user) {
       throw new NotFoundAppException('USER_NOT_FOUND', 'No user with this ID.');
     }
-    const { passwordHash: _passwordHash, googleId: _googleId, ...safe } = user;
-    return safe;
+
+    const [openTicketsCount, latestUsage, adminActions, recentActivity] = await Promise.all([
+      this.prisma.ticket.count({ where: { workspaceId: user.workspaceId, status: { notIn: CLOSED_TICKET_STATUSES } } }),
+      this.prisma.usageRecord.findFirst({ where: { workspaceId: user.workspaceId }, orderBy: { periodStart: 'desc' } }),
+      this.prisma.adminAuditLog.findMany({
+        where: { targetType: 'User', targetId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { admin: { select: { email: true } } },
+      }),
+      this.prisma.auditLog.findMany({
+        where: { workspaceId: user.workspaceId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: { actor: { select: { email: true, name: true } } },
+      }),
+    ]);
+
+    const { passwordHash, googleId, workspace, ...safe } = user;
+    const { _count, ...workspaceRest } = workspace;
+
+    return {
+      ...safe,
+      hasPassword: Boolean(passwordHash),
+      googleLinked: Boolean(googleId),
+      workspace: {
+        ...workspaceRest,
+        contactsCount: _count.contacts,
+        ticketsCount: _count.tickets,
+        openTicketsCount,
+        usage: latestUsage,
+      },
+      adminActions,
+      recentActivity,
+    };
   }
 
   async setSuspended(

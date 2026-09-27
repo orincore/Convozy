@@ -41,7 +41,7 @@ export default function AdminUsersPage() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
-    <AdminChrome>
+    <AdminChrome wide>
       <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Users</h1>

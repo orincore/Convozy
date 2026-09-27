@@ -29,6 +29,10 @@ function makeService() {
       count: jest.fn().mockResolvedValue(0),
       findUnique: jest.fn(),
     },
+    ticket: { count: jest.fn().mockResolvedValue(0) },
+    usageRecord: { findFirst: jest.fn().mockResolvedValue(null) },
+    adminAuditLog: { findMany: jest.fn().mockResolvedValue([]) },
+    auditLog: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn().mockImplementation((arg) => (Array.isArray(arg) ? Promise.all(arg) : arg(tx))),
   } as any;
   return { service: new AdminUsersService(prisma), prisma, tx };
@@ -73,5 +77,58 @@ describe('AdminUsersService.setSuspended', () => {
     expect(tx.adminAuditLog.create).toHaveBeenCalledWith({
       data: { adminId: 'admin-1', action: 'user.unsuspend', targetType: 'User', targetId: 'user-1' },
     });
+  });
+});
+
+describe('AdminUsersService.findOne', () => {
+  it('404s on a user ID that does not exist', async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findUnique.mockResolvedValue(null);
+    await expect(service.findOne('missing')).rejects.toThrow(NotFoundAppException);
+  });
+
+  it('strips credential fields and assembles the full dossier', async () => {
+    const { service, prisma } = makeService();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'a@b.com',
+      name: 'Ada',
+      role: 'OWNER',
+      workspaceId: 'ws-1',
+      isSuspended: false,
+      suspendedAt: null,
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-02'),
+      passwordHash: 'secret-hash',
+      googleId: null,
+      workspace: {
+        id: 'ws-1',
+        name: 'Ada Co',
+        createdAt: new Date('2026-01-01'),
+        users: [],
+        instagramAccounts: [],
+        automations: [],
+        subscription: null,
+        _count: { contacts: 3, tickets: 5 },
+      },
+    });
+    prisma.ticket.count.mockResolvedValue(2);
+    prisma.usageRecord.findFirst.mockResolvedValue({ periodStart: new Date(), periodEnd: new Date(), sendsUsed: 10, aiCallsUsed: 1 });
+    prisma.adminAuditLog.findMany.mockResolvedValue([{ id: 'aa-1', action: 'user.suspend', metadata: null, createdAt: new Date(), admin: { email: 'admin@convozy.com' } }]);
+    prisma.auditLog.findMany.mockResolvedValue([{ id: 'al-1', action: 'instagram.connect', metadata: null, createdAt: new Date(), actor: { email: 'a@b.com', name: 'Ada' } }]);
+
+    const result = await service.findOne('user-1');
+
+    expect(result).not.toHaveProperty('passwordHash');
+    expect(result).not.toHaveProperty('googleId');
+    expect(result.hasPassword).toBe(true);
+    expect(result.googleLinked).toBe(false);
+    expect(result.workspace.contactsCount).toBe(3);
+    expect(result.workspace.ticketsCount).toBe(5);
+    expect(result.workspace.openTicketsCount).toBe(2);
+    expect(result.workspace).not.toHaveProperty('_count');
+    expect(result.adminActions).toHaveLength(1);
+    expect(result.recentActivity).toHaveLength(1);
+    expect(prisma.ticket.count).toHaveBeenCalledWith({ where: { workspaceId: 'ws-1', status: { notIn: ['RESOLVED', 'CLOSED'] } } });
   });
 });

@@ -56,13 +56,50 @@ export interface AdminUserDetail {
   isSuspended: boolean;
   suspendedAt: string | null;
   createdAt: string;
+  updatedAt: string;
+  hasPassword: boolean;
+  googleLinked: boolean;
   workspace: {
     id: string;
     name: string;
-    instagramAccounts: { id: string; igUsername: string }[];
-    automations: { id: string }[];
-    subscription: { planId: string; status: string } | null;
+    createdAt: string;
+    users: { id: string; email: string; name: string | null; role: string; isSuspended: boolean; createdAt: string }[];
+    instagramAccounts: {
+      id: string;
+      igUsername: string;
+      displayName: string | null;
+      profilePictureUrl: string | null;
+      followersCount: number | null;
+      accountType: string | null;
+      pageId: string | null;
+      status: string;
+      tokenExpiresAt: string | null;
+      createdAt: string;
+    }[];
+    automations: { id: string; name: string; status: string; createdAt: string }[];
+    subscription: {
+      planId: string;
+      status: string;
+      provider: string;
+      currentPeriodEnd: string | null;
+      cancelAtPeriodEnd: boolean;
+      plan: {
+        name: string;
+        slug: string;
+        monthlySendLimit: number;
+        maxInstagramAccounts: number;
+        aiFeaturesEnabled: boolean;
+        priceUsdCents: number | null;
+        priceInrPaise: number | null;
+      };
+    } | null;
+    contactsCount: number;
+    ticketsCount: number;
+    openTicketsCount: number;
+    usage: { periodStart: string; periodEnd: string; sendsUsed: number; aiCallsUsed: number } | null;
   };
+  adminActions: { id: string; action: string; metadata: unknown; createdAt: string; admin: { email: string } }[];
+  recentActivity: { id: string; action: string; metadata: unknown; createdAt: string; actor: { email: string; name: string | null } | null }[];
 }
 
 export const adminAuthApi = {

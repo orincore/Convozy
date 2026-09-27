@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SignOut } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/cn';
 import { clearAdminToken, getCurrentAdmin } from '@/lib/admin-auth';
 
-export function AdminChrome({ children }: { children: ReactNode }) {
+export function AdminChrome({ children, wide = false }: { children: ReactNode; /** Edge-to-edge instead of the default 5xl cap — for dense tables/dossiers (users list, user detail). */ wide?: boolean }) {
   const router = useRouter();
   const admin = getCurrentAdmin();
 
@@ -34,7 +35,7 @@ export function AdminChrome({ children }: { children: ReactNode }) {
           </Button>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+      <main className={cn('px-6 py-8', wide ? 'w-full' : 'mx-auto max-w-5xl')}>{children}</main>
     </div>
   );
 }
