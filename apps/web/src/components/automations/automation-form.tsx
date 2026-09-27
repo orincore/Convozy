@@ -127,8 +127,9 @@ function MediaThumb({
           unoptimized
         />
       ) : (
-        <div className="flex h-full w-full items-center justify-center bg-muted">
-          <ImageSquare size={24} className="text-muted-foreground" />
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 bg-muted p-2 text-center">
+          <ImageSquare size={20} className="text-muted-foreground" />
+          {item.caption && <span className="line-clamp-3 text-[0.6875rem] leading-tight text-muted-foreground">{item.caption}</span>}
         </div>
       )}
       <div
@@ -166,7 +167,11 @@ const SCOPE_OPTIONS: {
     kind: 'story',
     groupLabel: 'Stories',
     all: { value: 'ALL_STORIES', title: 'All stories', hint: 'Watch replies to every story you post' },
-    specific: { value: 'SPECIFIC_STORIES', title: 'Specific story', hint: 'Pick one active story this rule watches' },
+    specific: {
+      value: 'SPECIFIC_STORIES',
+      title: 'Specific story',
+      hint: 'Pick from stories that have already gotten a reply — Instagram doesn’t let apps list your active stories directly',
+    },
   },
 ];
 
@@ -255,7 +260,9 @@ function ScopePicker({
           )}
           {media && media.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              {kind === 'story' ? 'No active stories found on this account.' : 'No recent posts found on this account.'}
+              {kind === 'story'
+                ? 'No story replies yet on this account. This list fills in once someone actually replies to a story — Meta doesn’t let apps browse your active stories directly. Use "All stories" until then.'
+                : 'No recent posts found on this account.'}
             </p>
           )}
           {media && media.length > 0 && (

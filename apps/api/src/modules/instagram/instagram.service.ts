@@ -289,44 +289,47 @@ export class InstagramService {
   }
 
   /**
-   * Active stories (last 24h) for the "specific story" automation scope
-   * picker. Story media isn't returned by the regular /media endpoint —
-   * Meta requires the dedicated GET /{ig-user-id}/stories endpoint (confirmed
-   * against Meta's IG User reference docs, 2026-09-27). Only currently-active
-   * stories are returned; once a story expires its ID can no longer be
-   * picked here (existing automations scoped to it simply stop matching).
+   * "Specific story" automation scope picker. NOT sourced from Meta's
+   * GET /{ig-user-id}/stories — verified against Meta's Stories reference
+   * doc (2026-09-27) that endpoint requires a Facebook User access token
+   * (instagram_basic + pages_read_engagement), i.e. it only works for the
+   * *Facebook Login for Business* product. This app uses *Instagram Login*
+   * (Business Login for Instagram, graph.instagram.com, Instagram User
+   * tokens) — confirmed live, that call returns 200 with an always-empty
+   * `data: []` regardless of active stories, for every account. There is no
+   * supported way for this app's login type to list a story via the Graph
+   * API at all.
+   *
+   * Fallback, not a full substitute: list distinct story media IDs seen on
+   * inbound STORY_REPLY webhook events (CommentEvent), most recent first —
+   * i.e. "stories that have already gotten at least one reply", not "every
+   * currently active story". A brand-new story with zero replies yet can't
+   * appear here (see TRACKER.md for the honest limitation this implies).
    */
   async listRecentStories(instagramAccountId: string): Promise<RecentMediaItem[]> {
-    const credentials = await this.getSendCredentials(instagramAccountId);
-    if (!credentials) {
-      return [];
-    }
-
-    const meta = this.configService.get('meta', { infer: true });
-    const params = new URLSearchParams({
-      fields: 'id,media_type,media_url,thumbnail_url,permalink,timestamp',
-      access_token: credentials.accessToken,
+    const events = await this.prisma.commentEvent.findMany({
+      where: { instagramAccountId, source: 'STORY_REPLY', mediaId: { not: null } },
+      orderBy: { receivedAt: 'desc' },
+      take: 200,
     });
 
-    const res = await fetch(
-      `https://graph.instagram.com/${meta.graphApiVersion}/${credentials.igBusinessId}/stories?${params.toString()}`,
-    );
-
-    if (!res.ok) {
-      const body = await res.text();
-      this.logger.error(`Story list fetch failed for account ${instagramAccountId}: ${res.status} ${body}`);
-      return [];
+    const byMediaId = new Map<string, (typeof events)[number]>();
+    for (const event of events) {
+      if (event.mediaId && !byMediaId.has(event.mediaId)) {
+        byMediaId.set(event.mediaId, event);
+      }
     }
 
-    const { data } = (await res.json()) as { data: InstagramMediaItem[] };
-    return data.map((item) => ({
-      id: item.id,
-      caption: null,
-      mediaType: item.media_type,
-      thumbnailUrl: item.thumbnail_url ?? item.media_url ?? null,
-      permalink: item.permalink,
-      timestamp: item.timestamp,
-    }));
+    return Array.from(byMediaId.values())
+      .slice(0, 30)
+      .map((event) => ({
+        id: event.mediaId!,
+        caption: event.text ? `Last reply: "${event.text.slice(0, 60)}"` : 'Replied to, no text',
+        mediaType: 'IMAGE' as const,
+        thumbnailUrl: null,
+        permalink: '',
+        timestamp: event.receivedAt.toISOString(),
+      }));
   }
 
   /** Permalink + caption of one of the account's own posts, for showing what a ticket is about. Null on any failure. */

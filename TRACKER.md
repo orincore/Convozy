@@ -1841,13 +1841,37 @@ Status: built and unit-tested, applied to the local database, **not deployed**
     and a post scope without a `COMMENT`/`LIVE_COMMENT` trigger, server-side,
     on both `create()` and `update()` — CLAUDE.md §5a A03/A04, the client
     already keeps these in sync but the server never trusts that it did.
-  - `instagram.service.ts`/`instagram.controller.ts`: new
-    `listRecentStories()` / `GET /instagram/accounts/:id/stories`, hitting
-    Meta's `GET /{ig-user-id}/stories` (confirmed via Meta's IG User
-    reference docs, 2026-09-27 — a real, documented endpoint, distinct from
-    the regular `/media` endpoint; only currently-active (≤24h) stories are
-    returned, so a `SPECIFIC_STORIES` automation scoped to an expired story
-    simply stops matching rather than erroring).
+  - **Correction, same day**: `listRecentStories()` originally called Meta's
+    `GET /{ig-user-id}/stories` directly, verified only against the docs at
+    the time. Deployed, then the user reported the picker always showing "no
+    active stories" even with real active stories — re-verified live (a
+    debug script hitting the real endpoint against two real connected
+    accounts, both returning `200 {"data": []}`) and against Meta's Stories
+    reference doc in full: that endpoint requires **a Facebook User access
+    token** (`instagram_basic` + `pages_read_engagement`) — it is part of
+    *Instagram API with Facebook Login for Business* (`graph.facebook.com`)
+    only. This app uses *Instagram API with Instagram Login* (Business Login
+    for Instagram, `graph.instagram.com`, Instagram User tokens) — which has
+    no supported way to list a story via the Graph API at all. The original
+    TRACKER entry saying this was "confirmed" was wrong — the doc search
+    that produced it didn't surface the permission requirement, and the
+    endpoint was never actually exercised live before shipping. Lesson
+    reinforced: "confirmed against the docs" isn't confirmed until it's also
+    exercised against the real API with this app's actual credentials.
+    - **Fix, not a workaround**: `listRecentStories()` no longer calls Meta
+      at all. It now lists distinct story media IDs from our own
+      `CommentEvent` log (`source: STORY_REPLY`), most recent first — i.e.
+      "stories that have already gotten at least one reply," not "every
+      currently active story." Real, honest limitation this implies: a
+      brand-new story with zero replies yet cannot appear in the picker
+      (there's no way to learn its ID until Meta delivers a reply webhook
+      for it). Surfaced explicitly in the picker's own copy ("No story
+      replies yet... Use All stories until then") and in the "Specific
+      story" option's hint text, not hidden — CLAUDE.md §14, a real external
+      constraint is a legitimate reason to scope narrower, but it has to be
+      documented and visible to the user, not silently half-working.
+    - Tests added: `instagram.service.spec.ts` `listRecentStories` (distinct
+      media IDs, most-recent-first, never touches `global.fetch`).
   - **User's second ask, same thread**: the "Choose posts" step should
     *declare* posts vs. stories, and the Build-automation step's trigger
     Source should update to match automatically, in both directions. Built

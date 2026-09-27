@@ -361,6 +361,42 @@ describe('InstagramService', () => {
     });
   });
 
+  describe('listRecentStories', () => {
+    it('lists distinct story media IDs from CommentEvent, most recent first, never calling the Graph API', async () => {
+      const receivedNewer = new Date('2026-02-02T00:00:00Z');
+      const receivedOlder = new Date('2026-02-01T00:00:00Z');
+      const prisma = {
+        commentEvent: {
+          findMany: jest.fn().mockResolvedValue([
+            { mediaId: 'story-1', text: 'love it!', receivedAt: receivedNewer },
+            { mediaId: 'story-1', text: 'older reply on same story', receivedAt: receivedOlder },
+            { mediaId: 'story-2', text: '', receivedAt: receivedOlder },
+          ]),
+        },
+      } as any;
+      global.fetch = jest.fn() as any;
+
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+      const stories = await service.listRecentStories('acc-1');
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(prisma.commentEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { instagramAccountId: 'acc-1', source: 'STORY_REPLY', mediaId: { not: null } } }),
+      );
+      expect(stories).toEqual([
+        expect.objectContaining({ id: 'story-1', caption: 'Last reply: "love it!"', timestamp: receivedNewer.toISOString() }),
+        expect.objectContaining({ id: 'story-2', caption: 'Replied to, no text', timestamp: receivedOlder.toISOString() }),
+      ]);
+    });
+
+    it('returns an empty list when no story has been replied to yet', async () => {
+      const prisma = { commentEvent: { findMany: jest.fn().mockResolvedValue([]) } } as any;
+      const service = new InstagramService(prisma, makeConfigService(), {} as any);
+
+      await expect(service.listRecentStories('acc-1')).resolves.toEqual([]);
+    });
+  });
+
   describe('findAccountIdByIgUserId', () => {
     it('resolves an active account by its igUserId (the webhook entry.id), not igBusinessId', async () => {
       const prisma = {
