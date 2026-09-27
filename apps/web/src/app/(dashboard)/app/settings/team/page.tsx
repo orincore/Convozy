@@ -190,7 +190,15 @@ export default function TeamPage() {
                   <p className="truncate text-sm">{i.email}</p>
                   <p className="text-xs text-muted-foreground">{ROLE_LABEL[i.role]}, expires {new Date(i.expiresAt).toLocaleDateString()}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => void run(() => teamApi.revokeInvite(i.id))}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (window.confirm(`Revoke the invite for ${i.email}? The link they have will stop working.`)) {
+                      void run(() => teamApi.revokeInvite(i.id));
+                    }
+                  }}
+                >
                   Revoke
                 </Button>
               </li>

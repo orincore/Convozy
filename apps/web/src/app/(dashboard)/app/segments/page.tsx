@@ -111,7 +111,11 @@ export default function SegmentsPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleDelete(segment.id)}
+                  onClick={() => {
+                    if (window.confirm(`Delete the "${segment.name}" segment? Automations using it will stop matching against it.`)) {
+                      void handleDelete(segment.id);
+                    }
+                  }}
                   disabled={deletingId === segment.id}
                   className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
                   aria-label={`Delete ${segment.name}`}

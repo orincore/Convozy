@@ -113,7 +113,11 @@ function AutomationRow({
           </Link>
           <button
             type="button"
-            onClick={() => onDelete(automation.id)}
+            onClick={() => {
+              if (window.confirm(`Delete "${automation.name}"? It will stop sending immediately and this can't be undone.`)) {
+                onDelete(automation.id);
+              }
+            }}
             disabled={busy}
             className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger active:scale-95 disabled:opacity-50"
             aria-label={`Delete ${automation.name}`}

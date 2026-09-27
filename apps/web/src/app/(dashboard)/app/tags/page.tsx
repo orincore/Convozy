@@ -141,7 +141,11 @@ export default function TagsPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handleDelete(tag.id)}
+                  onClick={() => {
+                    if (window.confirm(`Delete the "${tag.name}" tag? It will be removed from every contact that has it.`)) {
+                      void handleDelete(tag.id);
+                    }
+                  }}
                   disabled={deletingId === tag.id}
                   className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
                   aria-label={`Delete ${tag.name}`}

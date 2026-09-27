@@ -255,6 +255,7 @@ function ShellInner({ children }: { children: ReactNode }) {
   }
 
   function handleLogout() {
+    if (!window.confirm('Log out of Convozy?')) return;
     clearTokens();
     router.replace('/app/login');
   }

@@ -154,7 +154,11 @@ export default function CustomFieldsPage() {
                   <Badge variant="outline">{TYPES.find((t) => t.value === field.type)?.label ?? field.type}</Badge>
                   <button
                     type="button"
-                    onClick={() => handleDelete(field.id)}
+                    onClick={() => {
+                      if (window.confirm(`Delete the "${field.label}" field? Its stored value will be removed from every contact.`)) {
+                        void handleDelete(field.id);
+                      }
+                    }}
                     disabled={deletingId === field.id}
                     className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-muted hover:text-danger disabled:opacity-50"
                     aria-label={`Delete ${field.label}`}
