@@ -1947,12 +1947,19 @@ exercised a realistic Meta timestamp value.
   Meta's own example payloads (previously no test asserted `receivedAt` at
   all — the existing fixtures used an unrealistic 10-digit value that
   happened not to exercise the failure).
-- **Recovery**: the 42 failed jobs are still in Redis (`removeOnFail: false`)
-  and can be retried now that the fix is deployed — but retrying blindly
-  would send automation replies for potentially days-old interactions,
-  which could be a confusing, out-of-nowhere DM to a real customer. Decision
-  on whether/how to replay these needed from the user before touching them
-  — see conversation.
+- **Recovery — resolved 2026-09-27**: inspected all 42 failed jobs' actual
+  payloads before acting (never assumed) — they turned out to be **real**
+  customer story replies/DMs on both connected accounts
+  (`orincore.official`, `ig_orincore`) spanning an extended period, not just
+  the user's own test ("Congratulations 🥂", "Visarjan la ahes na bhai?",
+  "Wahhh jawai", etc. — genuine follower replies, not test text). User's
+  call: **discard, don't replay** — a business automation replying to a real
+  person days/weeks after they wrote in would look bizarre and unprompted
+  out of context, worse than no reply at all. All 42 removed from the
+  `webhook-events` failed set via a one-off script (`queue.getFailed()` +
+  `job.remove()` per job, run once, deleted after). Nothing was silently
+  sent; nothing is silently lost either — this note is the record of what
+  happened and why it was decided this way, not swept under anything.
 - **Process note**: this shipped, was marked "fully implemented and
   well-tested" in an earlier research pass, and passed 341 unit tests — none
   of which used a value resembling Meta's actual timestamp format. Lesson:
