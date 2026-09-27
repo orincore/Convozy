@@ -1,15 +1,14 @@
-'use client';
-
-import { useEffect, useState } from 'react';
+import { getVisitorCountry } from '@/lib/geo';
 
 /**
- * Region (from the browser's own locale, not a geo-IP guess) -> the local
- * word for that region's currency, so the "you won't pay a single X" line
- * reads naturally everywhere instead of listing currencies. Falls back to
- * "cent" (the initial SSR render, so there's no hydration mismatch) for any
- * region not covered - in practice just uninhabited/disputed territories,
- * this covers every UN member state plus the populated non-member
- * territories with their own currency word.
+ * Country -> the local word (or symbol, for India per user direction) for
+ * that region's currency, so the "you won't pay a single X" line reads
+ * naturally everywhere instead of listing currencies. Detected from the
+ * visitor's real IP address (see lib/geo.ts) - not their browser's
+ * language setting, which only reflects a preference, not location.
+ * Falls back to "cent" for any country not covered here - in practice just
+ * uninhabited/disputed territories, this covers every UN member state plus
+ * the populated non-member territories with their own currency word.
  */
 const DOLLAR_REGIONS = [
   'US', 'CA', 'AU', 'NZ', 'SG', 'HK', 'TW', 'LR', 'NA', 'ZW',
@@ -28,7 +27,7 @@ const EURO_REGIONS = [
 ];
 
 const POUND_REGIONS = ['GB', 'GI', 'FK', 'SH', 'IM', 'JE', 'GG'];
-const RUPEE_REGIONS = ['IN', 'PK', 'LK', 'NP', 'MU', 'SC'];
+const RUPEE_REGIONS = ['PK', 'LK', 'NP', 'MU', 'SC'];
 const DINAR_REGIONS = ['KW', 'BH', 'JO', 'IQ', 'LY', 'DZ', 'TN', 'RS'];
 const RIYAL_REGIONS = ['SA', 'QA', 'YE'];
 const FRANC_REGIONS = [
@@ -43,6 +42,9 @@ const KRONA_REGIONS = ['SE', 'NO', 'DK', 'IS', 'FO', 'GL'];
 const SHILLING_REGIONS = ['KE', 'TZ', 'UG', 'SO'];
 
 const CURRENCY_WORD_BY_REGION: Record<string, string> = {
+  // India shown as the currency symbol per product direction, not the word.
+  IN: '₹',
+
   ...Object.fromEntries(DOLLAR_REGIONS.map((r) => [r, 'dollar'])),
   ...Object.fromEntries(EURO_REGIONS.map((r) => [r, 'euro'])),
   ...Object.fromEntries(POUND_REGIONS.map((r) => [r, 'pound'])),
@@ -126,29 +128,10 @@ const CURRENCY_WORD_BY_REGION: Record<string, string> = {
   MV: 'rufiyaa',
   OM: 'rial',
   IR: 'rial',
-  EU: 'euro',
 };
 
-function regionFromLocale(locale: string): string | null {
-  // navigator.language is a BCP 47 tag like "en-US", "en-GB", "ar-AE" - the
-  // region subtag is what tells us the market, not the language itself.
-  const region = locale.split('-')[1]?.toUpperCase();
-  return region ?? null;
-}
-
-export function CurrencyWord() {
-  const [word, setWord] = useState('cent');
-
-  useEffect(() => {
-    try {
-      const region = regionFromLocale(navigator.language);
-      if (region && CURRENCY_WORD_BY_REGION[region]) {
-        setWord(CURRENCY_WORD_BY_REGION[region]);
-      }
-    } catch {
-      // navigator.language can throw in exotic environments - default word already set.
-    }
-  }, []);
-
+export async function CurrencyWord() {
+  const country = await getVisitorCountry();
+  const word = (country && CURRENCY_WORD_BY_REGION[country]) || 'cent';
   return <>{word}</>;
 }
