@@ -167,6 +167,39 @@ describe('WebhooksController.receive — story replies', () => {
     );
   });
 
+  it('treats messaging timestamp as milliseconds since epoch, not seconds (regression — see mapMessagingEventToJobData)', async () => {
+    const { controller, webhooksService } = makeController();
+    // A real 13-digit ms value from Meta's own example payloads (2019-09-23).
+    // The bug multiplied this by 1000, producing a ~58709 AD date that
+    // Postgres' DateTime range rejects at CommentEvent.create — every
+    // DM/story-reply/mention/referral event failed in production until this
+    // was caught from a live user report.
+    const realisticMsTimestamp = 1569262485349;
+    const payload: MetaWebhookPayload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-business-1',
+          time: 1700000000,
+          messaging: [
+            {
+              sender: { id: 'ig-scoped-user-1' },
+              recipient: { id: 'ig-business-1' },
+              timestamp: realisticMsTimestamp,
+              message: { mid: 'msg-ts-1', text: 'hi' },
+            },
+          ],
+        },
+      ],
+    };
+
+    await controller.receive(makeRequest(payload), 'sha256=whatever');
+
+    expect(webhooksService.enqueueIfNew).toHaveBeenCalledWith(
+      expect.objectContaining({ receivedAt: new Date(realisticMsTimestamp).toISOString() }),
+    );
+  });
+
   it('enqueues a plain DM (no reply_to.story) as a DM event', async () => {
     const { controller, webhooksService } = makeController();
     await controller.receive(makeRequest(messagingPayload({ message: { mid: 'msg-2', text: 'hey there' } })), 'sha256=x');

@@ -167,7 +167,16 @@ export class WebhooksController {
       instagramAccountId,
       fromUsername: event.sender.id,
       fromIgScopedId: event.sender.id,
-      receivedAt: new Date(event.timestamp * 1000).toISOString(),
+      // Meta's messaging-webhook `timestamp` is already milliseconds since
+      // epoch (confirmed against Meta's own example payloads, e.g.
+      // "timestamp": 1569262485349 — a 13-digit ms value, not seconds).
+      // Multiplying by 1000 here produced a ~58709 AD date that Postgres'
+      // DateTime range rejects, silently failing every DM/story-reply/
+      // mention/referral event in production (CommentEvent.create threw,
+      // the job retried 5x and died — verified live 2026-09-27 via a stuck
+      // BullMQ job's failedReason). Root-caused from a real user report of
+      // a story-reply automation not firing.
+      receivedAt: new Date(event.timestamp).toISOString(),
     };
     const message = event.message;
 

@@ -1915,6 +1915,53 @@ Status: built and unit-tested, applied to the local database, **not deployed**
 
 ---
 
+## Incident (2026-09-27): every DM/story-reply/mention/referral automation silently failing in production
+
+**Severity: high. Root-caused from a live user report** ("I replied to story
+but automation didn't work") — not caught by any test, because no test
+exercised a realistic Meta timestamp value.
+
+- **Bug**: `webhooks.controller.ts`'s `mapMessagingEventToJobData` computed
+  `receivedAt: new Date(event.timestamp * 1000).toISOString()`. Meta's
+  messaging-webhook `timestamp` field is already milliseconds since epoch
+  (confirmed against multiple official example payloads, all 13-digit values
+  like `1569262485349`) — multiplying by 1000 again produced a date around
+  **year 58709**, which is outside Postgres' `timestamp` range. Every
+  `CommentEvent.create()` for a DM, story reply, story mention, or referral
+  event threw `PrismaClientUnknownRequestError`, retried 5x with exponential
+  backoff (BullMQ default for this queue), then landed permanently in the
+  `webhook-events` queue's failed set. COMMENT/LIVE_COMMENT events were
+  unaffected — `mapChangeToJobData` uses `new Date().toISOString()` (current
+  time), not the payload's timestamp, so this bug only ever hit
+  conversation-sourced events.
+- **Impact, verified live**: 42 jobs sitting in the production
+  `webhook-events` failed set at time of discovery — every one a real DM,
+  story reply, story mention, or referral automation that silently never
+  fired since this code path shipped. This is the actual reason the
+  story-reply feature "worked in tests" (mocked CommentEvent objects,
+  timestamp math never exercised with a real value) but never worked for a
+  single real user in production.
+- **Fix**: removed the `* 1000` — `receivedAt: new Date(event.timestamp).toISOString()`.
+  Regression test added: `webhooks.controller.spec.ts` asserts the exact
+  `receivedAt` produced from a realistic 13-digit ms timestamp lifted from
+  Meta's own example payloads (previously no test asserted `receivedAt` at
+  all — the existing fixtures used an unrealistic 10-digit value that
+  happened not to exercise the failure).
+- **Recovery**: the 42 failed jobs are still in Redis (`removeOnFail: false`)
+  and can be retried now that the fix is deployed — but retrying blindly
+  would send automation replies for potentially days-old interactions,
+  which could be a confusing, out-of-nowhere DM to a real customer. Decision
+  on whether/how to replay these needed from the user before touching them
+  — see conversation.
+- **Process note**: this shipped, was marked "fully implemented and
+  well-tested" in an earlier research pass, and passed 341 unit tests — none
+  of which used a value resembling Meta's actual timestamp format. Lesson:
+  a mocked/synthetic test value for an external API's field can hide exactly
+  this class of bug; test fixtures for third-party payload fields should use
+  real example values from the provider's docs, not arbitrary placeholders.
+
+---
+
 ## Risks / known unknowns
 
 - Meta App Review approval timeline for messaging/comment-management scopes is
