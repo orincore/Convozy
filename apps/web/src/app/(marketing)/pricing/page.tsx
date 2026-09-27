@@ -8,6 +8,7 @@ import { CtaButton } from '@/components/marketing/cta-button';
 import { Reveal } from '@/components/marketing/reveal';
 import { DonateButton } from '@/components/marketing/donate-button';
 import { Comparison, PlanCards, Section } from '@/components/marketing/pricing-sections';
+import { CurrencyWord } from '@/components/marketing/currency-word';
 import { hreflangAlternates } from '@/lib/seo';
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_BASE_URL ?? 'http://localhost:3001';
@@ -128,7 +129,7 @@ export default function PricingPage() {
           <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Why is it free?</h2>
           <p className="mt-4 text-lg text-muted-foreground">
             Because replying to your own followers should not be a luxury. We keep Convozy lean, so
-            creators can have everything that works today without paying a rupee, dollar or cent.
+            creators can have everything that works today without paying a single <CurrencyWord />.
           </p>
         </Reveal>
       </section>
