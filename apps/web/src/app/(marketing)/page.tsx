@@ -17,6 +17,7 @@ import { AutomationPreview } from '@/components/marketing/automation-preview';
 import { Reveal } from '@/components/marketing/reveal';
 import { RotatingLines, type RotatingLine } from '@/components/marketing/rotating-lines';
 import { IntegrationBadges } from '@/components/marketing/integration-badges';
+import { CommunitySection } from '@/components/marketing/community-section';
 import { hreflangAlternates } from '@/lib/seo';
 
 /**
@@ -95,6 +96,11 @@ const FAQ_TABS: FaqTab[] = [
         question: 'Is it really free?',
         answer:
           'Yes. DMs are unlimited on the Free plan and it is not a trial, so there is no card needed. Pro is only for creators who run more than one Instagram account.',
+      },
+      {
+        question: 'Is Convozy a free ManyChat alternative?',
+        answer:
+          'For Instagram comment-to-DM, Story replies and live comments, yes. Those run on the Free plan with unlimited DMs. ManyChat is ahead on channels like WhatsApp and on broadcasts, so see our side-by-side comparison to check it fits.',
       },
       {
         question: 'Are there any hidden charges?',
@@ -274,6 +280,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      <CommunitySection />
+
       {/* Pricing teaser: offset plan cards after Spectrum UI's Offset Tiers */}
       <section className="mx-auto max-w-7xl px-4 py-28 sm:px-6">
         <div className="grid items-center gap-14 lg:grid-cols-12">
@@ -285,9 +293,12 @@ export default function HomePage() {
               Most tools charge creators just to answer their own comments. We think that&apos;s backwards, so the
               features that matter are free here. Every day you wait is another pile of comments nobody answered.
             </p>
-            <div className="mt-9">
+            <div className="mt-9 flex flex-wrap gap-3">
               <CtaButton href="/pricing" variant="ghost">
                 See full pricing
+              </CtaButton>
+              <CtaButton href="/manychat-alternative" variant="ghost">
+                Compare with ManyChat
               </CtaButton>
             </div>
           </Reveal>

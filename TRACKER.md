@@ -2071,6 +2071,21 @@ exercised a realistic Meta timestamp value.
   the People switcher, the ticket detail page's participant list, and
   thread message bubbles.
 
+- ✅ **SEO root cause + content push (2026-10-01). Code done, NOT yet deployed.**
+  Root cause of "not on Google": `convozy.orincore.com` had no A/AAAA record
+  (DNS fixed by the owner in Cloudflare → VPS 200.97.163.159); server env,
+  robots.txt, sitemap and canonicals were verified correct on the VPS. New:
+  `/manychat-alternative` (honest side-by-side incl. where ManyChat is ahead,
+  FAQPage + BreadcrumbList JSON-LD, in sitemap + footer + homepage link) and a
+  homepage `CommunitySection` inviting creators to post Reels and tag
+  @orincore.official. `CtaButton` now opens external URLs in a new tab.
+  **Open items:** ManyChat figures (25-contact free cap, $17 Essential) come
+  from the 2026-09-23 audit's third-party sources - re-verify on manychat.com
+  before relying on them. The two conflicting SPF TXT records on
+  `convozy.orincore.com` still need merging in Cloudflare (needs DNS access).
+  shadcn registry had no comparison/community block, so the page uses the
+  project's own Bezel/Reveal/CtaButton primitives.
+
 ## Risks / known unknowns
 
 - Meta App Review approval timeline for messaging/comment-management scopes is

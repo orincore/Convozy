@@ -20,6 +20,7 @@ const LAST_MODIFIED: Record<string, string> = {
   '/donate': '2026-09-27',
   '/features': '2026-09-27',
   '/features/comment-to-dm': '2026-09-27',
+  '/manychat-alternative': '2026-10-01',
   '/privacy': '2026-09-27',
   '/terms': '2026-09-27',
   '/data-deletion': '2026-09-27',

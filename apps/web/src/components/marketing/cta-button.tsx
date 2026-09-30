@@ -45,6 +45,14 @@ export function CtaButton(
   const primary = variant === 'primary';
 
   if ('href' in props && props.href) {
+    if (/^https?:\/\//.test(props.href)) {
+      return (
+        <a href={props.href} target="_blank" rel="noopener noreferrer" className={CLASSES(primary, className)}>
+          {children}
+          <TrailingIcon primary={primary} />
+        </a>
+      );
+    }
     return (
       <Link href={props.href} className={CLASSES(primary, className)}>
         {children}
